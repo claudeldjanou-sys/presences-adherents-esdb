@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Feuille de présences club</title>
+<title>Feuille de club</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -320,7 +320,7 @@
 </head>
 <body>
 <header>
-  <h1>FEUILLE DE PRESENCE DE CLUB</h1>
+  <h1>FEUILLE DE CLUB</h1>
   <div class="sub">Adhérents · équipes · présences aux entraînements</div>
 </header>
 <nav id="nav"></nav>
@@ -404,10 +404,10 @@ function renderNav(){
 function setTab(id){ currentTab = id; renderNav(); renderMain(); }
 
 function membersOf(teamName){
-  return roster.members.filter(m => m.type==='joueur' && m.team===teamName);
+  return roster.members.filter(m => m.team===teamName);
 }
-function nonPlayers(){
-  return roster.members.filter(m => m.type==='non-joueur');
+function unassigned(){
+  return roster.members.filter(m => !m.team);
 }
 function initials(name){
   return name.trim().split(/\s+/).map(p=>p[0]).slice(0,2).join('').toUpperCase();
@@ -436,11 +436,11 @@ function viewAdherents(){
     roster.teams.forEach(t=>{
       const ms = membersOf(t);
       membersHtml += `<div class="group-title">${escapeHtml(t)}</div>`;
-      membersHtml += ms.length ? ms.map(m=>memberRow(m)).join('') : '<div class="empty">Aucun joueur dans cette équipe.</div>';
+      membersHtml += ms.length ? ms.map(m=>memberRow(m)).join('') : '<div class="empty">Aucun adhérent dans cette équipe.</div>';
     });
-    const np = nonPlayers();
-    membersHtml += `<div class="group-title">Non-joueurs</div>`;
-    membersHtml += np.length ? np.map(m=>memberRow(m)).join('') : '<div class="empty">Aucun non-joueur enregistré.</div>';
+    const np = unassigned();
+    membersHtml += `<div class="group-title">Sans équipe</div>`;
+    membersHtml += np.length ? np.map(m=>memberRow(m)).join('') : '<div class="empty">Aucun adhérent sans équipe.</div>';
   }
 
   return `
@@ -460,15 +460,25 @@ function viewAdherents(){
       <label class="${newMemberType==='joueur'?'checked':''}" onclick="setMemberType('joueur')">
         <input type="radio" name="mtype" ${newMemberType==='joueur'?'checked':''} style="width:auto"> Joueur
       </label>
-      <label class="${newMemberType==='non-joueur'?'checked':''}" onclick="setMemberType('non-joueur')">
-        <input type="radio" name="mtype" ${newMemberType==='non-joueur'?'checked':''} style="width:auto"> Non-joueur
+      <label class="${newMemberType==='entraineur'?'checked':''}" onclick="setMemberType('entraineur')">
+        <input type="radio" name="mtype" ${newMemberType==='entraineur'?'checked':''} style="width:auto"> Entraîneur
       </label>
     </div>
-    ${newMemberType==='joueur' ? `
-    <label for="memberTeam">Équipe</label>
-    <select id="memberTeam">${teamOptions || '<option value="">Créez d\'abord une équipe</option>'}</select>
-    ` : ''}
+    <label for="memberTeam">Équipe (optionnel)</label>
+    <select id="memberTeam">
+      <option value="">Aucune équipe spécifique</option>
+      ${teamOptions}
+    </select>
     <button class="btn" onclick="addMember()">Ajouter l'adhérent</button>
+  </div>
+
+  <div class="card">
+    <h2>Importer des adhérents (CSV)</h2>
+    <div style="font-size:12.5px;color:var(--ink-dim);margin-bottom:8px;line-height:1.4">
+      Colonnes attendues : <strong>Nom, Type, Équipe</strong>. Type = "joueur" ou "entraineur". Les équipes inconnues sont créées automatiquement. La 1ère ligne peut être un en-tête.
+    </div>
+    <input id="csvImportInput" type="file" accept=".csv,text/csv" style="width:100%;background:var(--surface-2);border:1px solid var(--line);color:var(--ink);padding:9px 10px;border-radius:7px;font-size:13px;font-family:'Inter',sans-serif;">
+    <button class="btn" onclick="importMembersCSV()">Importer le fichier</button>
   </div>
 
   <div class="card">
@@ -479,7 +489,8 @@ function viewAdherents(){
   `;
 }
 function memberRow(m){
-  return `<div class="row"><span>${escapeHtml(m.name)}</span><button class="del" onclick="deleteMember('${m.id}')">Supprimer</button></div>`;
+  const typeLabel = m.type==='entraineur' ? 'Entraîneur' : 'Joueur';
+  return `<div class="row"><span>${escapeHtml(m.name)} <span class="tag">${typeLabel}</span></span><span style="display:flex;gap:4px;flex-shrink:0"><button class="del" style="color:var(--gold)" onclick="openEditMember('${m.id}')">Modifier</button><button class="del" onclick="deleteMember('${m.id}')">Supprimer</button></span></div>`;
 }
 function setMemberType(t){ newMemberType = t; renderMain(); }
 
@@ -493,9 +504,9 @@ async function addTeam(){
   renderMain();
 }
 async function deleteTeam(name){
-  if(!await showConfirm(`Supprimer l'équipe "${name}" ? Les joueurs associés deviendront "non-joueurs".`)) return;
+  if(!await showConfirm(`Supprimer l'équipe "${name}" ? Les adhérents associés deviendront "sans équipe".`)) return;
   roster.teams = roster.teams.filter(t=>t!==name);
-  roster.members = roster.members.map(m => m.team===name ? {...m, type:'non-joueur', team:null} : m);
+  roster.members = roster.members.map(m => m.team===name ? {...m, team:null} : m);
   await setJSON('club:roster', roster);
   renderMain();
 }
@@ -503,12 +514,8 @@ async function addMember(){
   const nameInput = document.getElementById('memberName');
   const name = nameInput.value.trim();
   if(!name) return;
-  let team = null;
-  if(newMemberType==='joueur'){
-    const sel = document.getElementById('memberTeam');
-    if(!sel || !sel.value){ await showAlert('Créez d\'abord une équipe, ou choisissez "Non-joueur".'); return; }
-    team = sel.value;
-  }
+  const sel = document.getElementById('memberTeam');
+  const team = sel && sel.value ? sel.value : null;
   roster.members.push({ id: uid(), name, type: newMemberType, team });
   await setJSON('club:roster', roster);
   renderMain();
@@ -519,6 +526,126 @@ async function deleteMember(id){
   await setJSON('club:roster', roster);
   renderMain();
 }
+
+function openEditMember(id){
+  const m = roster.members.find(x=>x.id===id);
+  if(!m) return;
+  let editType = m.type;
+  const root = document.getElementById('modalRoot');
+
+  function renderModal(){
+    const teamOptions = roster.teams.map(t=>`<option value="${escapeHtml(t)}" ${t===m.team?'selected':''}>${escapeHtml(t)}</option>`).join('');
+    root.innerHTML = `<div class="modal-overlay" id="editOverlay">
+      <div class="modal-box">
+        <h2 style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:0.5px;margin:0 0 4px;color:var(--gold)">Modifier l'adhérent</h2>
+        <label for="editName">Nom</label>
+        <input id="editName" type="text" value="${escapeHtml(m.name)}">
+        <div class="radio-row">
+          <label class="${editType==='joueur'?'checked':''}" onclick="setEditType('joueur')">
+            <input type="radio" name="etype" ${editType==='joueur'?'checked':''} style="width:auto"> Joueur
+          </label>
+          <label class="${editType==='entraineur'?'checked':''}" onclick="setEditType('entraineur')">
+            <input type="radio" name="etype" ${editType==='entraineur'?'checked':''} style="width:auto"> Entraîneur
+          </label>
+        </div>
+        <label for="editTeam">Équipe (optionnel)</label>
+        <select id="editTeam">
+          <option value="" ${!m.team?'selected':''}>Aucune équipe spécifique</option>
+          ${teamOptions}
+        </select>
+        <div class="modal-actions" style="margin-top:16px">
+          <button class="btn-cancel" id="editCancel">Annuler</button>
+          <button class="btn-ok" id="editSave">Enregistrer</button>
+        </div>
+      </div>
+    </div>`;
+    document.getElementById('editCancel').onclick = ()=>{ root.innerHTML=''; };
+    document.getElementById('editSave').onclick = ()=> saveEditMember(id, editType);
+    root.querySelector('.modal-overlay').onclick = (e)=>{ if(e.target===root.querySelector('.modal-overlay')) root.innerHTML=''; };
+  }
+
+  window.setEditType = (t)=>{ editType = t; renderModal(); };
+  renderModal();
+}
+
+async function saveEditMember(id, type){
+  const nameInput = document.getElementById('editName');
+  const name = nameInput.value.trim();
+  if(!name){ await showAlert('Le nom est obligatoire.'); return; }
+  const sel = document.getElementById('editTeam');
+  const team = sel && sel.value ? sel.value : null;
+  const idx = roster.members.findIndex(m=>m.id===id);
+  if(idx===-1) return;
+  roster.members[idx] = { ...roster.members[idx], name, type, team };
+  await setJSON('club:roster', roster);
+  document.getElementById('modalRoot').innerHTML = '';
+  renderMain();
+}
+
+// ---------- IMPORT CSV ----------
+function parseCSV(text){
+  text = text.replace(/^\uFEFF/, '');
+  const lines = text.split(/\r\n|\n|\r/).filter(l=>l.length>0);
+  if(lines.length===0) return [];
+  const delim = (lines[0].split(';').length > lines[0].split(',').length) ? ';' : ',';
+  return lines.map(line=>parseCSVLine(line, delim));
+}
+function parseCSVLine(line, delim){
+  const result = [];
+  let cur = '';
+  let inQuotes = false;
+  for(let i=0;i<line.length;i++){
+    const c = line[i];
+    if(inQuotes){
+      if(c==='"'){
+        if(line[i+1]==='"'){ cur+='"'; i++; }
+        else inQuotes=false;
+      } else cur+=c;
+    }else{
+      if(c==='"') inQuotes=true;
+      else if(c===delim){ result.push(cur); cur=''; }
+      else cur+=c;
+    }
+  }
+  result.push(cur);
+  return result.map(v=>v.trim());
+}
+async function importMembersCSV(){
+  const input = document.getElementById('csvImportInput');
+  const file = input.files && input.files[0];
+  if(!file){ await showAlert('Choisissez d\'abord un fichier CSV.'); return; }
+  let text;
+  try{ text = await file.text(); }
+  catch(e){ await showAlert('Impossible de lire ce fichier.'); return; }
+  const rows = parseCSV(text);
+  if(rows.length===0){ await showAlert('Fichier CSV vide.'); return; }
+
+  let startIdx = 0;
+  const headerLower = rows[0].map(c=>c.toLowerCase());
+  if(headerLower[0]==='nom' || headerLower.includes('nom')) startIdx = 1;
+
+  let imported = 0;
+  for(let i=startIdx;i<rows.length;i++){
+    const row = rows[i];
+    const name = (row[0]||'').trim();
+    if(!name) continue;
+    const typeRaw = (row[1]||'joueur').trim().toLowerCase();
+    const type = (typeRaw.startsWith('entra') || typeRaw==='coach') ? 'entraineur' : 'joueur';
+    const teamNameRaw = (row[2]||'').trim();
+    let team = null;
+    if(teamNameRaw){
+      if(!roster.teams.includes(teamNameRaw)) roster.teams.push(teamNameRaw);
+      team = teamNameRaw;
+    }
+    roster.members.push({ id: uid(), name, type, team });
+    imported++;
+  }
+  await setJSON('club:roster', roster);
+  input.value = '';
+  renderMain();
+  await showAlert(imported > 0 ? `${imported} adhérent(s) importé(s).` : 'Aucun adhérent valide trouvé dans le fichier.');
+}
+
 
 // ---------- ENTRAINEMENTS ----------
 function viewEntrainements(){
@@ -563,7 +690,7 @@ function viewEntrainements(){
 }
 function concernedMembers(tr){
   if(tr.team==='Tous') return roster.members;
-  return roster.members.filter(m => m.type==='joueur' && m.team===tr.team);
+  return roster.members.filter(m => m.team===tr.team);
 }
 function formatDate(d){
   const dt = new Date(d+'T00:00:00');
@@ -640,7 +767,7 @@ function viewStats(){
 
   const teamRows = ts.length ? ts.map(t=>`
     <div class="attend-row">
-      <div class="attend-name">${escapeHtml(t.team)} <span class="tag">${t.count} joueur${t.count>1?'s':''}</span></div>
+      <div class="attend-name">${escapeHtml(t.team)} <span class="tag">${t.count} adhérent${t.count>1?'s':''}</span></div>
       <div style="width:110px;display:flex;align-items:center;gap:8px">
         <div style="flex:1;height:7px;background:var(--surface-2);border-radius:4px;overflow:hidden">
           <div style="width:${t.avg??0}%;height:100%;background:${barColor(t.avg)}"></div>
