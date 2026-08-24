@@ -320,7 +320,7 @@
 </head>
 <body>
 <header>
-  <h1>FEUILLE DE PRESENCE AU CLUB</h1>
+  <h1>FEUILLE DE PRÉSENCES AU CLUB</h1>
   <div class="sub">Adhérents · équipes · présences aux entraînements</div>
 </header>
 <nav id="nav"></nav>
@@ -780,7 +780,7 @@ function viewStats(){
   const memberRows = ms.length ? ms.map(m=>`
     <div class="attend-row">
       <div class="avatar">${initials(m.name)}</div>
-      <div class="attend-name">${escapeHtml(m.name)}${m.team?` <span class="tag">${escapeHtml(m.team)}</span>`:''}</div>
+      <div class="attend-name" style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px" onclick="openMemberHistory('${m.id}')">${escapeHtml(m.name)}${m.team?` <span class="tag">${escapeHtml(m.team)}</span>`:''}</div>
       <div style="width:130px;display:flex;align-items:center;gap:8px">
         <div style="flex:1;height:7px;background:var(--surface-2);border-radius:4px;overflow:hidden">
           <div style="width:${m.pct??0}%;height:100%;background:${barColor(m.pct)}"></div>
@@ -804,6 +804,55 @@ function viewStats(){
     <button class="btn btn-ghost" onclick="exportAttendance()" style="margin-left:8px">Exporter les présences (CSV)</button>
   </div>
   `;
+}
+
+function openMemberHistory(id){
+  const m = roster.members.find(x=>x.id===id);
+  if(!m) return;
+  const root = document.getElementById('modalRoot');
+
+  const records = trainings
+    .filter(tr => concernedMembers(tr).some(cm=>cm.id===id))
+    .slice()
+    .sort((a,b)=> b.date.localeCompare(a.date))
+    .map(tr => ({ tr, state: (attendance[tr.id]||{})[id] }));
+
+  const total = records.length;
+  const present = records.filter(r=>r.state===true).length;
+  const pct = total ? Math.round(present/total*100) : null;
+
+  const rowsHtml = records.length ? records.map(r=>{
+    let statusLabel, statusColor;
+    if(r.state===true){ statusLabel='Présent'; statusColor='var(--present)'; }
+    else if(r.state===false){ statusLabel='Absent'; statusColor='var(--absent)'; }
+    else { statusLabel='Non renseigné'; statusColor='var(--ink-dim)'; }
+    return `<div class="attend-row" style="padding:9px 0">
+      <div style="width:10px;height:10px;border-radius:50%;background:${statusColor};flex-shrink:0"></div>
+      <div class="attend-name" style="flex:1">
+        <div style="font-size:14px">${formatDate(r.tr.date)}</div>
+        <div style="font-size:11.5px;color:var(--ink-dim)">${escapeHtml(r.tr.team)}${r.tr.label?' · '+escapeHtml(r.tr.label):''}</div>
+      </div>
+      <span style="font-size:11.5px;font-weight:700;color:${statusColor};text-transform:uppercase;letter-spacing:0.3px;flex-shrink:0">${statusLabel}</span>
+    </div>`;
+  }).join('') : '<div class="empty">Aucun entraînement concerné par cet adhérent.</div>';
+
+  root.innerHTML = `<div class="modal-overlay" id="historyOverlay">
+    <div class="modal-box" style="max-width:420px;max-height:82vh;display:flex;flex-direction:column">
+      <h2 style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:0.5px;margin:0 0 2px;color:var(--gold)">${escapeHtml(m.name)}</h2>
+      <div style="font-size:12.5px;color:var(--ink-dim);margin-bottom:10px">
+        ${m.type==='entraineur'?'Entraîneur':'Joueur'}${m.team?' · '+escapeHtml(m.team):''} — ${pct===null?'Aucune donnée':present+'/'+total+' présences ('+pct+'%)'}
+      </div>
+      <div style="overflow-y:auto;flex:1;margin:0 -20px;padding:0 20px">
+        ${rowsHtml}
+      </div>
+      <div class="modal-actions" style="margin-top:16px">
+        <button class="btn-ok" id="historyClose">Fermer</button>
+      </div>
+    </div>
+  </div>`;
+  const close = ()=>{ root.innerHTML=''; };
+  document.getElementById('historyClose').onclick = close;
+  root.querySelector('.modal-overlay').onclick = (e)=>{ if(e.target===root.querySelector('.modal-overlay')) close(); };
 }
 
 function csvEscape(v){
