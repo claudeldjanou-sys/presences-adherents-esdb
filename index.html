@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Feuille de club</title>
+<title>Feuille de présences club</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -440,12 +440,13 @@ function viewEntrainements(){
     const concerned = concernedMembers(tr);
     const att = attendance[tr.id] || {};
     const present = concerned.filter(m=>att[m.id]===true).length;
-    return `<div class="training-card" onclick="goToPresence('${tr.id}')">
-      <div>
+    return `<div class="training-card">
+      <div onclick="goToPresence('${tr.id}')" style="flex:1;cursor:pointer">
         <div class="training-date">${formatDate(tr.date)}</div>
         <div style="font-size:12px;color:var(--ink-dim)">${escapeHtml(tr.team)}${tr.label?' · '+escapeHtml(tr.label):''}</div>
       </div>
       <div class="score">${present}/${concerned.length}</div>
+      <button class="del" onclick="event.stopPropagation(); deleteTraining('${tr.id}')" style="margin-left:8px">Supprimer</button>
     </div>`;
   }).join('') : '<div class="empty">Aucun entraînement enregistré.</div>';
 
@@ -484,6 +485,15 @@ async function addTraining(){
   if(!date){ alert('Choisissez une date.'); return; }
   trainings.push({ id: uid(), date, team, label });
   await setJSON('club:trainings', trainings);
+  renderMain();
+}
+async function deleteTraining(id){
+  if(!confirm('Supprimer cet entraînement ? Les présences enregistrées pour celui-ci seront perdues.')) return;
+  trainings = trainings.filter(t=>t.id!==id);
+  delete attendance[id];
+  await setJSON('club:trainings', trainings);
+  await setJSON('club:attendance', attendance);
+  if(selectedTraining===id) selectedTraining = null;
   renderMain();
 }
 function goToPresence(id){
@@ -613,11 +623,12 @@ function viewPresences(){
   const tr = trainings.find(t=>t.id===selectedTraining);
 
   const picker = sorted.map(t=>{
-    return `<div class="training-card ${t.id===selectedTraining?'selected':''}" onclick="selectTraining('${t.id}')">
-      <div>
+    return `<div class="training-card ${t.id===selectedTraining?'selected':''}">
+      <div onclick="selectTraining('${t.id}')" style="flex:1;cursor:pointer">
         <div class="training-date">${formatDate(t.date)}</div>
         <div style="font-size:12px;color:var(--ink-dim)">${escapeHtml(t.team)}</div>
       </div>
+      <button class="del" onclick="event.stopPropagation(); deleteTraining('${t.id}')" style="margin-left:8px">Supprimer</button>
     </div>`;
   }).join('');
 
