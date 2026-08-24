@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Feuille de club</title>
+<title>Feuille de présences au club</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -320,7 +320,7 @@
 </head>
 <body>
 <header>
-  <h1>FEUILLE DE CLUB</h1>
+  <h1>FEUILLE DE PRESENCE AU CLUB</h1>
   <div class="sub">Adhérents · équipes · présences aux entraînements</div>
 </header>
 <nav id="nav"></nav>
@@ -464,9 +464,9 @@ function viewAdherents(){
         <input type="radio" name="mtype" ${newMemberType==='entraineur'?'checked':''} style="width:auto"> Entraîneur
       </label>
     </div>
-    <label for="memberTeam">Équipe (optionnel)</label>
+    <label for="memberTeam">Équipe</label>
     <select id="memberTeam">
-      <option value="">Aucune équipe spécifique</option>
+      <option value="" disabled ${roster.teams.length?'selected':''}>${roster.teams.length ? 'Choisir une équipe' : 'Créez d\'abord une équipe'}</option>
       ${teamOptions}
     </select>
     <button class="btn" onclick="addMember()">Ajouter l'adhérent</button>
@@ -515,7 +515,8 @@ async function addMember(){
   const name = nameInput.value.trim();
   if(!name) return;
   const sel = document.getElementById('memberTeam');
-  const team = sel && sel.value ? sel.value : null;
+  if(!sel || !sel.value){ await showAlert(roster.teams.length ? 'Choisissez une équipe.' : 'Créez d\'abord une équipe.'); return; }
+  const team = sel.value;
   roster.members.push({ id: uid(), name, type: newMemberType, team });
   await setJSON('club:roster', roster);
   renderMain();
@@ -675,7 +676,7 @@ function viewEntrainements(){
     </div>
     <label for="trTeam">Équipe concernée</label>
     <select id="trTeam">
-      <option value="Tous">Equipe</option>
+      <option value="Tous">Tous les adhérents</option>
       ${teamOptions}
     </select>
     <label for="trLabel">Précision (facultatif)</label>
