@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Feuille de club</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0A0A0A;
+    --surface:#161616;
+    --surface-2:#202020;
+    --line:#333029;
+    --ink:#F5F1E6;
+    --ink-dim:#9C968A;
+    --gold:#E8AC2E;
+    --gold-dim:#A87D1E;
+    --present:#4CAF6D;
+    --absent:#D9534F;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:'Inter',system-ui,sans-serif;
+    min-height:100vh;
+    background-image:
+      repeating-linear-gradient(0deg, transparent, transparent 79px, rgba(232,172,46,0.025) 80px),
+      repeating-linear-gradient(90deg, transparent, transparent 79px, rgba(232,172,46,0.025) 80px);
+  }
+  header{
+    padding:22px 18px 14px;
+    border-bottom:1px solid var(--line);
+  }
+  h1{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:34px;
+    letter-spacing:1px;
+    margin:0;
+    color:var(--ink);
+  }
+  .sub{
+    font-size:12.5px;
+    color:var(--ink-dim);
+    margin-top:4px;
+  }
+  nav{
+    display:flex;
+    gap:2px;
+    padding:10px 12px 0;
+    border-bottom:1px solid var(--line);
+    background:var(--surface);
+  }
+  nav button{
+    flex:1;
+    background:none;
+    border:none;
+    color:var(--ink-dim);
+    font-family:'Inter',sans-serif;
+    font-weight:600;
+    font-size:13px;
+    padding:12px 6px 14px;
+    cursor:pointer;
+    border-bottom:3px solid transparent;
+    letter-spacing:0.3px;
+    text-transform:uppercase;
+  }
+  nav button.active{
+    color:var(--gold);
+    border-bottom-color:var(--gold);
+  }
+  main{
+    padding:16px;
+    max-width:640px;
+    margin:0 auto;
+    padding-bottom:60px;
+  }
+  .card{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:16px;
+    margin-bottom:14px;
+  }
+  .card h2{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:20px;
+    letter-spacing:0.5px;
+    margin:0 0 12px;
+    color:var(--gold);
+  }
+  label{
+    display:block;
+    font-size:12px;
+    color:var(--ink-dim);
+    margin-bottom:4px;
+    margin-top:10px;
+    text-transform:uppercase;
+    letter-spacing:0.4px;
+  }
+  input[type=text], input[type=date], select{
+    width:100%;
+    background:var(--surface-2);
+    border:1px solid var(--line);
+    color:var(--ink);
+    padding:10px 12px;
+    border-radius:7px;
+    font-size:15px;
+    font-family:'Inter',sans-serif;
+  }
+  input:focus, select:focus, button:focus-visible{
+    outline:2px solid var(--gold);
+    outline-offset:1px;
+  }
+  .radio-row{
+    display:flex;
+    gap:10px;
+    margin-top:6px;
+  }
+  .radio-row label{
+    flex:1;
+    display:flex;
+    align-items:center;
+    gap:6px;
+    background:var(--surface-2);
+    border:1px solid var(--line);
+    border-radius:7px;
+    padding:9px 10px;
+    font-size:13px;
+    text-transform:none;
+    letter-spacing:0;
+    margin:0;
+    cursor:pointer;
+  }
+  .radio-row label.checked{
+    border-color:var(--gold);
+    color:var(--gold);
+  }
+  .btn{
+    margin-top:14px;
+    background:var(--gold);
+    color:#1a1405;
+    border:none;
+    font-weight:700;
+    font-size:13.5px;
+    padding:11px 16px;
+    border-radius:7px;
+    cursor:pointer;
+    text-transform:uppercase;
+    letter-spacing:0.4px;
+  }
+  .btn:hover{background:#f2bd47;}
+  .btn-ghost{
+    background:none;
+    border:1px solid var(--line);
+    color:var(--ink-dim);
+  }
+  .btn-ghost:hover{color:var(--ink);}
+  .row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:9px 0;
+    border-bottom:1px solid var(--line);
+    font-size:14px;
+  }
+  .row:last-child{border-bottom:none;}
+  .tag{
+    font-size:10.5px;
+    text-transform:uppercase;
+    letter-spacing:0.4px;
+    color:var(--ink-dim);
+    background:var(--surface-2);
+    padding:3px 8px;
+    border-radius:20px;
+    margin-left:8px;
+  }
+  .del{
+    background:none;
+    border:none;
+    color:var(--absent);
+    font-size:12px;
+    cursor:pointer;
+    padding:4px 8px;
+  }
+  .group-title{
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:0.6px;
+    color:var(--ink-dim);
+    margin:14px 0 2px;
+  }
+  .empty{
+    color:var(--ink-dim);
+    font-size:13.5px;
+    font-style:italic;
+    padding:6px 0;
+  }
+  .training-card{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    background:var(--surface-2);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:12px 14px;
+    margin-bottom:8px;
+    cursor:pointer;
+  }
+  .training-card.selected{border-color:var(--gold);}
+  .training-date{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:19px;
+    letter-spacing:0.5px;
+  }
+  .score{
+    font-family:'Bebas Neue',sans-serif;
+    font-size:22px;
+    color:var(--gold);
+  }
+  .attend-row{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    padding:10px 0;
+    border-bottom:1px solid var(--line);
+  }
+  .attend-row:last-child{border-bottom:none;}
+  .avatar{
+    width:34px;height:34px;border-radius:50%;
+    background:var(--surface-2);
+    border:1px solid var(--line);
+    display:flex;align-items:center;justify-content:center;
+    font-size:12px;font-weight:700;color:var(--ink-dim);
+    flex-shrink:0;
+  }
+  .attend-name{flex:1;font-size:14.5px;}
+  .toggle{
+    display:flex;gap:6px;
+  }
+  .toggle button{
+    border:1px solid var(--line);
+    background:var(--surface-2);
+    color:var(--ink-dim);
+    font-size:11px;
+    text-transform:uppercase;
+    padding:6px 10px;
+    border-radius:6px;
+    cursor:pointer;
+    font-weight:700;
+  }
+  .toggle button.on-present{background:rgba(76,175,109,0.18);border-color:var(--present);color:var(--present);}
+  .toggle button.on-absent{background:rgba(217,83,79,0.18);border-color:var(--absent);color:var(--absent);}
+  .note{
+    font-size:11.5px;
+    color:var(--ink-dim);
+    text-align:center;
+    margin-top:18px;
+  }
+  .loading{
+    text-align:center;
+    padding:60px 0;
+    color:var(--ink-dim);
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>FEUILLE DE CLUB</h1>
+  <div class="sub">Adhérents · équipes · présences aux entraînements</div>
+</header>
+<nav id="nav"></nav>
+<main id="app"><div class="loading">Chargement…</div></main>
+
+<script>
+let roster = { teams: [], members: [] };
+let trainings = [];
+let attendance = {};
+let currentTab = 'adherents';
+let selectedTraining = null;
+let newMemberType = 'joueur';
+let loaded = false;
+
+const STORAGE_PREFIX = 'kali-club:';
+async function getJSON(key, fallback){
+  try{
+    const raw = localStorage.getItem(STORAGE_PREFIX + key);
+    return raw ? JSON.parse(raw) : fallback;
+  }catch(e){ console.error('Erreur de lecture', e); return fallback; }
+}
+async function setJSON(key, val){
+  try{
+    localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(val));
+  }catch(e){ console.error('Erreur de sauvegarde', e); alert("Impossible d'enregistrer les données (stockage local plein ou bloqué par le navigateur)."); }
+}
+function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+
+async function loadAll(){
+  roster = await getJSON('club:roster', { teams: [], members: [] });
+  trainings = await getJSON('club:trainings', []);
+  attendance = await getJSON('club:attendance', {});
+  loaded = true;
+  renderNav();
+  renderMain();
+}
+
+function renderNav(){
+  const nav = document.getElementById('nav');
+  const tabs = [['adherents','Adhérents'],['entrainements','Entraînements'],['presences','Présences'],['stats','Stats']];
+  nav.innerHTML = tabs.map(([id,label]) =>
+    `<button class="${currentTab===id?'active':''}" onclick="setTab('${id}')">${label}</button>`
+  ).join('');
+}
+function setTab(id){ currentTab = id; renderNav(); renderMain(); }
+
+function membersOf(teamName){
+  return roster.members.filter(m => m.type==='joueur' && m.team===teamName);
+}
+function nonPlayers(){
+  return roster.members.filter(m => m.type==='non-joueur');
+}
+function initials(name){
+  return name.trim().split(/\s+/).map(p=>p[0]).slice(0,2).join('').toUpperCase();
+}
+
+function renderMain(){
+  const app = document.getElementById('app');
+  if(!loaded){ app.innerHTML = '<div class="loading">Chargement…</div>'; return; }
+  if(currentTab==='adherents') app.innerHTML = viewAdherents();
+  else if(currentTab==='entrainements') app.innerHTML = viewEntrainements();
+  else if(currentTab==='presences') app.innerHTML = viewPresences();
+  else app.innerHTML = viewStats();
+}
+
+// ---------- ADHERENTS ----------
+function viewAdherents(){
+  const teamOptions = roster.teams.map(t=>`<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+  let teamsListHtml = roster.teams.length
+    ? roster.teams.map(t=>`<div class="row"><span>${escapeHtml(t)}</span><button class="del" onclick="deleteTeam('${escapeAttr(t)}')">Supprimer</button></div>`).join('')
+    : '<div class="empty">Aucune équipe pour l\'instant. Ajoutez-en une pour commencer.</div>';
+
+  let membersHtml = '';
+  if(roster.teams.length===0 && roster.members.length===0){
+    membersHtml = '<div class="empty">Aucun adhérent enregistré.</div>';
+  }else{
+    roster.teams.forEach(t=>{
+      const ms = membersOf(t);
+      membersHtml += `<div class="group-title">${escapeHtml(t)}</div>`;
+      membersHtml += ms.length ? ms.map(m=>memberRow(m)).join('') : '<div class="empty">Aucun joueur dans cette équipe.</div>';
+    });
+    const np = nonPlayers();
+    membersHtml += `<div class="group-title">Non-joueurs</div>`;
+    membersHtml += np.length ? np.map(m=>memberRow(m)).join('') : '<div class="empty">Aucun non-joueur enregistré.</div>';
+  }
+
+  return `
+  <div class="card">
+    <h2>Équipes</h2>
+    ${teamsListHtml}
+    <label for="newTeam">Nouvelle équipe</label>
+    <input id="newTeam" type="text" placeholder="Ex. Seniors A">
+    <button class="btn" onclick="addTeam()">Ajouter l'équipe</button>
+  </div>
+
+  <div class="card">
+    <h2>Ajouter un adhérent</h2>
+    <label for="memberName">Nom</label>
+    <input id="memberName" type="text" placeholder="Nom et prénom">
+    <div class="radio-row">
+      <label class="${newMemberType==='joueur'?'checked':''}" onclick="setMemberType('joueur')">
+        <input type="radio" name="mtype" ${newMemberType==='joueur'?'checked':''} style="width:auto"> Joueur
+      </label>
+      <label class="${newMemberType==='non-joueur'?'checked':''}" onclick="setMemberType('non-joueur')">
+        <input type="radio" name="mtype" ${newMemberType==='non-joueur'?'checked':''} style="width:auto"> Non-joueur
+      </label>
+    </div>
+    ${newMemberType==='joueur' ? `
+    <label for="memberTeam">Équipe</label>
+    <select id="memberTeam">${teamOptions || '<option value="">Créez d\'abord une équipe</option>'}</select>
+    ` : ''}
+    <button class="btn" onclick="addMember()">Ajouter l'adhérent</button>
+  </div>
+
+  <div class="card">
+    <h2>Liste des adhérents</h2>
+    ${membersHtml}
+  </div>
+  <div class="note">Données enregistrées dans ce navigateur, sur cet appareil.</div>
+  `;
+}
+function memberRow(m){
+  return `<div class="row"><span>${escapeHtml(m.name)}</span><button class="del" onclick="deleteMember('${m.id}')">Supprimer</button></div>`;
+}
+function setMemberType(t){ newMemberType = t; renderMain(); }
+
+async function addTeam(){
+  const input = document.getElementById('newTeam');
+  const name = input.value.trim();
+  if(!name) return;
+  if(roster.teams.includes(name)){ alert('Cette équipe existe déjà.'); return; }
+  roster.teams.push(name);
+  await setJSON('club:roster', roster);
+  renderMain();
+}
+async function deleteTeam(name){
+  if(!confirm(`Supprimer l'équipe "${name}" ? Les joueurs associés deviendront "non-joueurs".`)) return;
+  roster.teams = roster.teams.filter(t=>t!==name);
+  roster.members = roster.members.map(m => m.team===name ? {...m, type:'non-joueur', team:null} : m);
+  await setJSON('club:roster', roster);
+  renderMain();
+}
+async function addMember(){
+  const nameInput = document.getElementById('memberName');
+  const name = nameInput.value.trim();
+  if(!name) return;
+  let team = null;
+  if(newMemberType==='joueur'){
+    const sel = document.getElementById('memberTeam');
+    if(!sel || !sel.value){ alert('Créez d\'abord une équipe, ou choisissez "Non-joueur".'); return; }
+    team = sel.value;
+  }
+  roster.members.push({ id: uid(), name, type: newMemberType, team });
+  await setJSON('club:roster', roster);
+  renderMain();
+}
+async function deleteMember(id){
+  if(!confirm('Supprimer cet adhérent ?')) return;
+  roster.members = roster.members.filter(m=>m.id!==id);
+  await setJSON('club:roster', roster);
+  renderMain();
+}
+
+// ---------- ENTRAINEMENTS ----------
+function viewEntrainements(){
+  const teamOptions = roster.teams.map(t=>`<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+  const sorted = [...trainings].sort((a,b)=> b.date.localeCompare(a.date));
+  let listHtml = sorted.length ? sorted.map(tr=>{
+    const concerned = concernedMembers(tr);
+    const att = attendance[tr.id] || {};
+    const present = concerned.filter(m=>att[m.id]===true).length;
+    return `<div class="training-card" onclick="goToPresence('${tr.id}')">
+      <div>
+        <div class="training-date">${formatDate(tr.date)}</div>
+        <div style="font-size:12px;color:var(--ink-dim)">${escapeHtml(tr.team)}${tr.label?' · '+escapeHtml(tr.label):''}</div>
+      </div>
+      <div class="score">${present}/${concerned.length}</div>
+    </div>`;
+  }).join('') : '<div class="empty">Aucun entraînement enregistré.</div>';
+
+  return `
+  <div class="card">
+    <h2>Nouvel entraînement</h2>
+    <label for="trDate">Date</label>
+    <input id="trDate" type="date">
+    <label for="trTeam">Équipe concernée</label>
+    <select id="trTeam">
+      <option value="Tous">Tous les adhérents</option>
+      ${teamOptions}
+    </select>
+    <label for="trLabel">Précision (facultatif)</label>
+    <input id="trLabel" type="text" placeholder="Ex. Séance physique">
+    <button class="btn" onclick="addTraining()">Créer l'entraînement</button>
+  </div>
+  <div class="card">
+    <h2>Entraînements</h2>
+    ${listHtml}
+  </div>
+  `;
+}
+function concernedMembers(tr){
+  if(tr.team==='Tous') return roster.members;
+  return roster.members.filter(m => m.type==='joueur' && m.team===tr.team);
+}
+function formatDate(d){
+  const dt = new Date(d+'T00:00:00');
+  return dt.toLocaleDateString('fr-FR', { day:'2-digit', month:'short', year:'numeric' });
+}
+async function addTraining(){
+  const date = document.getElementById('trDate').value;
+  const team = document.getElementById('trTeam').value;
+  const label = document.getElementById('trLabel').value.trim();
+  if(!date){ alert('Choisissez une date.'); return; }
+  trainings.push({ id: uid(), date, team, label });
+  await setJSON('club:trainings', trainings);
+  renderMain();
+}
+function goToPresence(id){
+  selectedTraining = id;
+  currentTab = 'presences';
+  renderNav();
+  renderMain();
+}
+
+// ---------- STATS ----------
+function memberStatsList(){
+  return roster.members.map(m=>{
+    let total=0, present=0;
+    trainings.forEach(tr=>{
+      if(concernedMembers(tr).some(cm=>cm.id===m.id)){
+        total++;
+        if((attendance[tr.id]||{})[m.id]===true) present++;
+      }
+    });
+    const pct = total ? Math.round(present/total*100) : null;
+    return { ...m, total, present, pct };
+  }).sort((a,b)=>{
+    if(a.pct===null && b.pct===null) return a.name.localeCompare(b.name);
+    if(a.pct===null) return 1;
+    if(b.pct===null) return -1;
+    return a.pct - b.pct;
+  });
+}
+function teamStatsList(){
+  return roster.teams.map(t=>{
+    const ms = memberStatsList().filter(m=>m.team===t && m.total>0);
+    const avg = ms.length ? Math.round(ms.reduce((s,m)=>s+m.pct,0)/ms.length) : null;
+    return { team:t, avg, count: membersOf(t).length };
+  });
+}
+function barColor(pct){
+  if(pct===null) return 'var(--line)';
+  if(pct>=75) return 'var(--present)';
+  if(pct>=50) return 'var(--gold)';
+  return 'var(--absent)';
+}
+function viewStats(){
+  if(trainings.length===0){
+    return `<div class="card"><h2>Stats</h2><div class="empty">Aucune donnée : créez des entraînements et relevez des présences d'abord.</div></div>`;
+  }
+  const ms = memberStatsList();
+  const ts = teamStatsList();
+
+  const teamRows = ts.length ? ts.map(t=>`
+    <div class="attend-row">
+      <div class="attend-name">${escapeHtml(t.team)} <span class="tag">${t.count} joueur${t.count>1?'s':''}</span></div>
+      <div style="width:110px;display:flex;align-items:center;gap:8px">
+        <div style="flex:1;height:7px;background:var(--surface-2);border-radius:4px;overflow:hidden">
+          <div style="width:${t.avg??0}%;height:100%;background:${barColor(t.avg)}"></div>
+        </div>
+        <span style="font-size:12px;color:var(--ink-dim);width:34px;text-align:right">${t.avg===null?'—':t.avg+'%'}</span>
+      </div>
+    </div>`).join('') : '<div class="empty">Aucune équipe.</div>';
+
+  const memberRows = ms.length ? ms.map(m=>`
+    <div class="attend-row">
+      <div class="avatar">${initials(m.name)}</div>
+      <div class="attend-name">${escapeHtml(m.name)}${m.team?` <span class="tag">${escapeHtml(m.team)}</span>`:''}</div>
+      <div style="width:130px;display:flex;align-items:center;gap:8px">
+        <div style="flex:1;height:7px;background:var(--surface-2);border-radius:4px;overflow:hidden">
+          <div style="width:${m.pct??0}%;height:100%;background:${barColor(m.pct)}"></div>
+        </div>
+        <span style="font-size:12px;color:var(--ink-dim);width:52px;text-align:right">${m.pct===null?'—':m.present+'/'+m.total}</span>
+      </div>
+    </div>`).join('') : '<div class="empty">Aucun adhérent.</div>';
+
+  return `
+  <div class="card">
+    <h2>Présence par équipe</h2>
+    ${teamRows}
+  </div>
+  <div class="card">
+    <h2>Présence par adhérent</h2>
+    ${memberRows}
+  </div>
+  <div class="card">
+    <h2>Export</h2>
+    <button class="btn" onclick="exportMembers()">Exporter les adhérents (CSV)</button>
+    <button class="btn btn-ghost" onclick="exportAttendance()" style="margin-left:8px">Exporter les présences (CSV)</button>
+  </div>
+  `;
+}
+
+function csvEscape(v){
+  v = String(v ?? '');
+  if(/[",;\n]/.test(v)) return '"' + v.replace(/"/g,'""') + '"';
+  return v;
+}
+function toCSV(rows){ return rows.map(r=>r.map(csvEscape).join(',')).join('\r\n'); }
+function downloadCSV(filename, rows){
+  const csv = '\uFEFF' + toCSV(rows);
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+function exportMembers(){
+  const rows = [['Nom','Type','Équipe']];
+  roster.members.forEach(m=> rows.push([m.name, m.type, m.team||'']));
+  downloadCSV('adherents.csv', rows);
+}
+function exportAttendance(){
+  const rows = [['Date','Entraînement (équipe)','Nom','Type','Présent']];
+  [...trainings].sort((a,b)=>a.date.localeCompare(b.date)).forEach(tr=>{
+    concernedMembers(tr).forEach(m=>{
+      const state = (attendance[tr.id]||{})[m.id];
+      rows.push([tr.date, tr.team, m.name, m.type, state===true?'Oui':(state===false?'Non':'')]);
+    });
+  });
+  downloadCSV('presences.csv', rows);
+}
+
+// ---------- PRESENCES ----------
+function viewPresences(){
+  if(trainings.length===0){
+    return `<div class="card"><h2>Présences</h2><div class="empty">Créez d'abord un entraînement dans l'onglet "Entraînements".</div></div>`;
+  }
+  const sorted = [...trainings].sort((a,b)=> b.date.localeCompare(a.date));
+  if(!selectedTraining) selectedTraining = sorted[0].id;
+  const tr = trainings.find(t=>t.id===selectedTraining);
+
+  const picker = sorted.map(t=>{
+    return `<div class="training-card ${t.id===selectedTraining?'selected':''}" onclick="selectTraining('${t.id}')">
+      <div>
+        <div class="training-date">${formatDate(t.date)}</div>
+        <div style="font-size:12px;color:var(--ink-dim)">${escapeHtml(t.team)}</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  let sheetHtml = '';
+  if(tr){
+    const concerned = concernedMembers(tr);
+    const att = attendance[tr.id] || {};
+    const present = concerned.filter(m=>att[m.id]===true).length;
+    const rows = concerned.length ? concerned.map(m=>{
+      const state = att[m.id];
+      return `<div class="attend-row">
+        <div class="avatar">${initials(m.name)}</div>
+        <div class="attend-name">${escapeHtml(m.name)}</div>
+        <div class="toggle">
+          <button class="${state===true?'on-present':''}" onclick="setAttendance('${tr.id}','${m.id}',true)">Présent</button>
+          <button class="${state===false?'on-absent':''}" onclick="setAttendance('${tr.id}','${m.id}',false)">Absent</button>
+        </div>
+      </div>`;
+    }).join('') : '<div class="empty">Aucun adhérent concerné par cet entraînement.</div>';
+
+    sheetHtml = `
+    <div class="card">
+      <h2>${formatDate(tr.date)} — ${escapeHtml(tr.team)}</h2>
+      <div style="font-size:13px;color:var(--ink-dim);margin-bottom:8px">
+        <span class="score" style="font-size:17px">${present}/${concerned.length}</span> présents
+      </div>
+      ${rows}
+    </div>`;
+  }
+
+  return `
+  <div class="card">
+    <h2>Choisir un entraînement</h2>
+    ${picker}
+  </div>
+  ${sheetHtml}
+  `;
+}
+function selectTraining(id){ selectedTraining = id; renderMain(); }
+async function setAttendance(trainingId, memberId, value){
+  if(!attendance[trainingId]) attendance[trainingId] = {};
+  attendance[trainingId][memberId] = value;
+  await setJSON('club:attendance', attendance);
+  renderMain();
+}
+
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function escapeAttr(s){ return String(s).replace(/'/g, "\\'"); }
+
+loadAll();
+</script>
+</body>
+</html>
