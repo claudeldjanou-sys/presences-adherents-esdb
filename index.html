@@ -264,15 +264,68 @@
     padding:60px 0;
     color:var(--ink-dim);
   }
+  .modal-overlay{
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,0.6);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    z-index:1000;
+    padding:20px;
+  }
+  .modal-box{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:20px;
+    max-width:360px;
+    width:100%;
+  }
+  .modal-box p{
+    margin:0 0 16px;
+    font-size:14.5px;
+    line-height:1.4;
+  }
+  .modal-actions{
+    display:flex;
+    gap:10px;
+    justify-content:flex-end;
+  }
+  .modal-actions button{
+    padding:9px 16px;
+    border-radius:7px;
+    font-size:13px;
+    font-weight:700;
+    cursor:pointer;
+    text-transform:uppercase;
+    letter-spacing:0.3px;
+  }
+  .modal-actions .btn-cancel{
+    background:none;
+    border:1px solid var(--line);
+    color:var(--ink-dim);
+  }
+  .modal-actions .btn-confirm{
+    background:var(--absent);
+    border:none;
+    color:#fff;
+  }
+  .modal-actions .btn-ok{
+    background:var(--gold);
+    border:none;
+    color:#1a1405;
+  }
 </style>
 </head>
 <body>
 <header>
-  <h1>FEUILLE DE CLUB</h1>
+  <h1>FEUILLE DE PRESENCE DE CLUB</h1>
   <div class="sub">Adhérents · équipes · présences aux entraînements</div>
 </header>
 <nav id="nav"></nav>
 <main id="app"><div class="loading">Chargement…</div></main>
+<div id="modalRoot"></div>
 
 <script>
 let roster = { teams: [], members: [] };
@@ -293,9 +346,44 @@ async function getJSON(key, fallback){
 async function setJSON(key, val){
   try{
     localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(val));
-  }catch(e){ console.error('Erreur de sauvegarde', e); alert("Impossible d'enregistrer les données (stockage local plein ou bloqué par le navigateur)."); }
+  }catch(e){ console.error('Erreur de sauvegarde', e); await showAlert("Impossible d'enregistrer les données (stockage local plein ou bloqué par le navigateur)."); }
 }
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+
+function showConfirm(message){
+  return new Promise(resolve=>{
+    const root = document.getElementById('modalRoot');
+    root.innerHTML = `<div class="modal-overlay">
+      <div class="modal-box">
+        <p>${escapeHtml(message)}</p>
+        <div class="modal-actions">
+          <button class="btn-cancel" id="modalCancel">Annuler</button>
+          <button class="btn-confirm" id="modalConfirm">Confirmer</button>
+        </div>
+      </div>
+    </div>`;
+    const close = (val)=>{ root.innerHTML=''; resolve(val); };
+    document.getElementById('modalCancel').onclick = ()=>close(false);
+    document.getElementById('modalConfirm').onclick = ()=>close(true);
+    root.querySelector('.modal-overlay').onclick = (e)=>{ if(e.target.classList.contains('modal-overlay')) close(false); };
+  });
+}
+function showAlert(message){
+  return new Promise(resolve=>{
+    const root = document.getElementById('modalRoot');
+    root.innerHTML = `<div class="modal-overlay">
+      <div class="modal-box">
+        <p>${escapeHtml(message)}</p>
+        <div class="modal-actions">
+          <button class="btn-ok" id="modalOk">OK</button>
+        </div>
+      </div>
+    </div>`;
+    const close = ()=>{ root.innerHTML=''; resolve(); };
+    document.getElementById('modalOk').onclick = close;
+    root.querySelector('.modal-overlay').onclick = (e)=>{ if(e.target.classList.contains('modal-overlay')) close(); };
+  });
+}
 
 async function loadAll(){
   roster = await getJSON('club:roster', { teams: [], members: [] });
@@ -399,13 +487,13 @@ async function addTeam(){
   const input = document.getElementById('newTeam');
   const name = input.value.trim();
   if(!name) return;
-  if(roster.teams.includes(name)){ alert('Cette équipe existe déjà.'); return; }
+  if(roster.teams.includes(name)){ await showAlert('Cette équipe existe déjà.'); return; }
   roster.teams.push(name);
   await setJSON('club:roster', roster);
   renderMain();
 }
 async function deleteTeam(name){
-  if(!confirm(`Supprimer l'équipe "${name}" ? Les joueurs associés deviendront "non-joueurs".`)) return;
+  if(!await showConfirm(`Supprimer l'équipe "${name}" ? Les joueurs associés deviendront "non-joueurs".`)) return;
   roster.teams = roster.teams.filter(t=>t!==name);
   roster.members = roster.members.map(m => m.team===name ? {...m, type:'non-joueur', team:null} : m);
   await setJSON('club:roster', roster);
@@ -418,7 +506,7 @@ async function addMember(){
   let team = null;
   if(newMemberType==='joueur'){
     const sel = document.getElementById('memberTeam');
-    if(!sel || !sel.value){ alert('Créez d\'abord une équipe, ou choisissez "Non-joueur".'); return; }
+    if(!sel || !sel.value){ await showAlert('Créez d\'abord une équipe, ou choisissez "Non-joueur".'); return; }
     team = sel.value;
   }
   roster.members.push({ id: uid(), name, type: newMemberType, team });
@@ -426,7 +514,7 @@ async function addMember(){
   renderMain();
 }
 async function deleteMember(id){
-  if(!confirm('Supprimer cet adhérent ?')) return;
+  if(!await showConfirm('Supprimer cet adhérent ?')) return;
   roster.members = roster.members.filter(m=>m.id!==id);
   await setJSON('club:roster', roster);
   renderMain();
@@ -454,7 +542,10 @@ function viewEntrainements(){
   <div class="card">
     <h2>Nouvel entraînement</h2>
     <label for="trDate">Date</label>
-    <input id="trDate" type="date">
+    <div style="display:flex;gap:8px">
+      <input id="trDate" type="date" style="flex:1">
+      <button type="button" class="btn btn-ghost" style="margin-top:0;white-space:nowrap" onclick="setDateToday()">Aujourd'hui</button>
+    </div>
     <label for="trTeam">Équipe concernée</label>
     <select id="trTeam">
       <option value="Tous">Tous les adhérents</option>
@@ -478,17 +569,22 @@ function formatDate(d){
   const dt = new Date(d+'T00:00:00');
   return dt.toLocaleDateString('fr-FR', { day:'2-digit', month:'short', year:'numeric' });
 }
+function setDateToday(){
+  const d = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  document.getElementById('trDate').value = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+}
 async function addTraining(){
   const date = document.getElementById('trDate').value;
   const team = document.getElementById('trTeam').value;
   const label = document.getElementById('trLabel').value.trim();
-  if(!date){ alert('Choisissez une date.'); return; }
+  if(!date){ await showAlert('Choisissez une date.'); return; }
   trainings.push({ id: uid(), date, team, label });
   await setJSON('club:trainings', trainings);
   renderMain();
 }
 async function deleteTraining(id){
-  if(!confirm('Supprimer cet entraînement ? Les présences enregistrées pour celui-ci seront perdues.')) return;
+  if(!await showConfirm('Supprimer cet entraînement ? Les présences enregistrées pour celui-ci seront perdues.')) return;
   trainings = trainings.filter(t=>t.id!==id);
   delete attendance[id];
   await setJSON('club:trainings', trainings);
