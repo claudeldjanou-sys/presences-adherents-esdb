@@ -34,34 +34,12 @@
     padding:22px 18px 14px;
     border-bottom:1px solid var(--line);
   }
-  .title-row{
-    display:flex;
-    align-items:baseline;
-    gap:10px;
-    flex-wrap:wrap;
-  }
   h1{
     font-family:'Bebas Neue',sans-serif;
     font-size:34px;
     letter-spacing:1px;
     margin:0;
     color:var(--ink);
-  }
-  .title-edit-btn{
-    background:none;
-    border:1px solid var(--line);
-    color:var(--ink-dim);
-    font-size:11px;
-    text-transform:uppercase;
-    letter-spacing:0.3px;
-    padding:3px 8px;
-    border-radius:6px;
-    cursor:pointer;
-    flex-shrink:0;
-  }
-  .title-edit-btn:hover{
-    color:var(--gold);
-    border-color:var(--gold);
   }
   .sub{
     font-size:12.5px;
@@ -342,13 +320,8 @@
 </head>
 <body>
 <header>
-  <div class="title-row">
-    <h1 id="pageTitle">FEUILLE DE PRÉSENCES AU CLUB</h1>
-    <button class="title-edit-btn" onclick="openEditTitle()">Modifier</button>
-    <button class="title-edit-btn" onclick="manualRefresh()">Actualiser</button>
-  </div>
+  <h1>FEUILLE DE PRÉSENCES AU CLUB</h1>
   <div class="sub">Adhérents · équipes · présences aux entraînements</div>
-  <div id="syncBanner" style="display:none;font-size:11.5px;margin-top:6px"></div>
 </header>
 <nav id="nav"></nav>
 <main id="app"><div class="loading">Chargement…</div></main>
@@ -361,20 +334,7 @@ let attendance = {};
 let currentTab = 'adherents';
 let selectedTraining = null;
 let newMemberType = 'joueur';
-let lastMemberTeam = null;
-let pageTitle = 'Feuille de présences au club';
 let loaded = false;
-
-// ===============================================================
-// Connexion à la Google Sheet partagée (voir Code.gs fourni)
-// Colle ici l'URL de déploiement (se termine par /exec) et le
-// même TOKEN que celui défini dans le script Apps Script.
-// ===============================================================
-const API_URL = 'PASTE_YOUR_APPS_SCRIPT_URL_HERE';
-const API_TOKEN = 'change-moi-en-secret';
-
-let apiAvailable = false;
-let refreshTimer = null;
 
 const STORAGE_PREFIX = 'kali-club:';
 async function getJSON(key, fallback){
@@ -383,63 +343,10 @@ async function getJSON(key, fallback){
     return raw ? JSON.parse(raw) : fallback;
   }catch(e){ console.error('Erreur de lecture', e); return fallback; }
 }
-function cacheLocally(key, val){
-  try{ localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(val)); }catch(e){ console.error('Erreur de cache local', e); }
-}
-
-function apiConfigured(){
-  return !!API_URL && !API_URL.includes('PASTE_YOUR_APPS_SCRIPT_URL_HERE');
-}
-
-async function apiGetAll(){
-  if(!apiConfigured()) return null;
-  try{
-    const url = API_URL + (API_URL.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(API_TOKEN);
-    const res = await fetch(url, { method:'GET' });
-    const data = await res.json();
-    if(data.error) throw new Error(data.error);
-    return data;
-  }catch(e){
-    console.error('Erreur API (lecture) :', e);
-    return null;
-  }
-}
-
-async function apiSave(action, payload){
-  if(!apiConfigured()) return false;
-  try{
-    const res = await fetch(API_URL, {
-      method:'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ action, token: API_TOKEN, ...payload })
-    });
-    const data = await res.json();
-    if(data.error) throw new Error(data.error);
-    return true;
-  }catch(e){
-    console.error('Erreur API (écriture) :', e);
-    return false;
-  }
-}
-
-// setJSON écrit toujours en local (cache hors-ligne) et, si l'API
-// Google Sheets est configurée, y écrit aussi pour un stockage
-// partagé et pérenne entre tous les appareils.
 async function setJSON(key, val){
-  cacheLocally(key, val);
-  const routes = {
-    'club:roster': ['saveRoster', { roster: val }],
-    'club:trainings': ['saveTrainings', { trainings: val }],
-    'club:attendance': ['saveAttendance', { attendance: val }],
-    'club:title': ['saveTitle', { title: val }]
-  };
-  const entry = routes[key];
-  if(!entry) return;
-  if(apiConfigured()){
-    const ok = await apiSave(entry[0], entry[1]);
-    setSyncStatus(ok);
-    if(!ok) await showAlert("La synchronisation avec la Google Sheet a échoué. Vos données sont conservées sur cet appareil et seront à resynchroniser plus tard.");
-  }
+  try{
+    localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(val));
+  }catch(e){ console.error('Erreur de sauvegarde', e); await showAlert("Impossible d'enregistrer les données (stockage local plein ou bloqué par le navigateur)."); }
 }
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 
@@ -478,134 +385,13 @@ function showAlert(message){
   });
 }
 
-function applyLoadedData(data){
-  roster = data.roster || { teams: [], members: [] };
-  trainings = data.trainings || [];
-  attendance = data.attendance || {};
-  pageTitle = data.title || 'Feuille de présences au club';
-  let migrated = false;
-  roster.members = roster.members.map(m=>{
-    if(m.nom===undefined && m.name!==undefined){
-      migrated = true;
-      const { name, ...rest } = m;
-      return { ...rest, nom: name || '', prenom: '', telephone: '' };
-    }
-    return m;
-  });
-  cacheLocally('club:roster', roster);
-  cacheLocally('club:trainings', trainings);
-  cacheLocally('club:attendance', attendance);
-  cacheLocally('club:title', pageTitle);
-  return migrated;
-}
-
 async function loadAll(){
-  let migrated = false;
-  if(apiConfigured()){
-    const remote = await apiGetAll();
-    if(remote){
-      apiAvailable = true;
-      migrated = applyLoadedData(remote);
-    }else{
-      apiAvailable = false;
-      roster = await getJSON('club:roster', { teams: [], members: [] });
-      trainings = await getJSON('club:trainings', []);
-      attendance = await getJSON('club:attendance', {});
-      pageTitle = await getJSON('club:title', 'Feuille de présences au club');
-    }
-  }else{
-    apiAvailable = false;
-    roster = await getJSON('club:roster', { teams: [], members: [] });
-    trainings = await getJSON('club:trainings', []);
-    attendance = await getJSON('club:attendance', {});
-    pageTitle = await getJSON('club:title', 'Feuille de présences au club');
-  }
-  if(migrated) await setJSON('club:roster', roster);
-  applyPageTitle();
-  renderSyncBanner();
+  roster = await getJSON('club:roster', { teams: [], members: [] });
+  trainings = await getJSON('club:trainings', []);
+  attendance = await getJSON('club:attendance', {});
   loaded = true;
   renderNav();
   renderMain();
-  if(apiConfigured()) startAutoRefresh();
-}
-
-function renderSyncBanner(){
-  const el = document.getElementById('syncBanner');
-  if(!el) return;
-  if(!apiConfigured()){
-    el.style.display = 'block';
-    el.style.color = 'var(--ink-dim)';
-    el.textContent = 'Stockage local uniquement (non partagé) — configurez API_URL pour activer le partage via Google Sheets.';
-  }else if(apiAvailable){
-    el.style.display = 'none';
-  }else{
-    el.style.display = 'block';
-    el.style.color = 'var(--absent)';
-    el.textContent = 'Connexion à la Google Sheet impossible — données affichées depuis la dernière synchronisation sur cet appareil.';
-  }
-}
-function setSyncStatus(ok){
-  apiAvailable = ok;
-  renderSyncBanner();
-}
-function startAutoRefresh(){
-  if(refreshTimer) return;
-  refreshTimer = setInterval(async ()=>{
-    const modalOpen = document.getElementById('modalRoot').innerHTML.trim() !== '';
-    const typing = document.activeElement && ['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName);
-    if(modalOpen || typing) return;
-    const remote = await apiGetAll();
-    if(remote){
-      setSyncStatus(true);
-      applyLoadedData(remote);
-      renderMain();
-    }else{
-      setSyncStatus(false);
-    }
-  }, 20000);
-}
-async function manualRefresh(){
-  const remote = await apiGetAll();
-  if(remote){
-    setSyncStatus(true);
-    applyLoadedData(remote);
-    renderMain();
-  }else{
-    setSyncStatus(false);
-    await showAlert("Impossible de récupérer les données à jour depuis la Google Sheet.");
-  }
-}
-function applyPageTitle(){
-  document.getElementById('pageTitle').textContent = pageTitle.toUpperCase();
-  document.title = pageTitle;
-}
-function openEditTitle(){
-  const root = document.getElementById('modalRoot');
-  root.innerHTML = `<div class="modal-overlay" id="titleOverlay">
-    <div class="modal-box">
-      <h2 style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:0.5px;margin:0 0 4px;color:var(--gold)">Modifier le titre</h2>
-      <label for="titleInput">Titre de la page</label>
-      <input id="titleInput" type="text" value="${escapeHtml(pageTitle)}">
-      <div class="modal-actions" style="margin-top:16px">
-        <button class="btn-cancel" id="titleCancel">Annuler</button>
-        <button class="btn-ok" id="titleSave">Enregistrer</button>
-      </div>
-    </div>
-  </div>`;
-  const close = ()=>{ root.innerHTML=''; };
-  document.getElementById('titleCancel').onclick = close;
-  document.getElementById('titleSave').onclick = saveTitle;
-  root.querySelector('.modal-overlay').onclick = (e)=>{ if(e.target===root.querySelector('.modal-overlay')) close(); };
-  document.getElementById('titleInput').focus();
-}
-async function saveTitle(){
-  const input = document.getElementById('titleInput');
-  const val = input.value.trim();
-  if(!val){ await showAlert('Le titre est obligatoire.'); return; }
-  pageTitle = val;
-  await setJSON('club:title', pageTitle);
-  applyPageTitle();
-  document.getElementById('modalRoot').innerHTML = '';
 }
 
 function renderNav(){
@@ -618,13 +404,10 @@ function renderNav(){
 function setTab(id){ currentTab = id; renderNav(); renderMain(); }
 
 function membersOf(teamName){
-  return roster.members.filter(m => m.team===teamName).sort((a,b)=>fullName(a).localeCompare(fullName(b), 'fr', {sensitivity:'base'}));
+  return roster.members.filter(m => m.team===teamName);
 }
 function unassigned(){
-  return roster.members.filter(m => !m.team).sort((a,b)=>fullName(a).localeCompare(fullName(b), 'fr', {sensitivity:'base'}));
-}
-function fullName(m){
-  return `${m.prenom||''} ${m.nom||''}`.trim();
+  return roster.members.filter(m => !m.team);
 }
 function initials(name){
   return name.trim().split(/\s+/).map(p=>p[0]).slice(0,2).join('').toUpperCase();
@@ -671,12 +454,8 @@ function viewAdherents(){
 
   <div class="card">
     <h2>Ajouter un adhérent</h2>
-    <label for="memberNom">Nom</label>
-    <input id="memberNom" type="text" placeholder="Nom de famille">
-    <label for="memberPrenom">Prénom</label>
-    <input id="memberPrenom" type="text" placeholder="Prénom">
-    <label for="memberTelephone">Téléphone de contact</label>
-    <input id="memberTelephone" type="tel" placeholder="06 12 34 56 78">
+    <label for="memberName">Nom</label>
+    <input id="memberName" type="text" placeholder="Nom et prénom">
     <div class="radio-row">
       <label class="${newMemberType==='joueur'?'checked':''}" onclick="setMemberType('joueur')">
         <input type="radio" name="mtype" ${newMemberType==='joueur'?'checked':''} style="width:auto"> Joueur
@@ -687,8 +466,8 @@ function viewAdherents(){
     </div>
     <label for="memberTeam">Équipe</label>
     <select id="memberTeam">
-      <option value="" disabled ${roster.teams.length?'':'selected'}>${roster.teams.length ? 'Choisir une équipe' : 'Créez d\'abord une équipe'}</option>
-      ${roster.teams.map(t=>`<option value="${escapeHtml(t)}" ${t===lastMemberTeam?'selected':''}>${escapeHtml(t)}</option>`).join('')}
+      <option value="" disabled ${roster.teams.length?'selected':''}>${roster.teams.length ? 'Choisir une équipe' : 'Créez d\'abord une équipe'}</option>
+      ${teamOptions}
     </select>
     <button class="btn" onclick="addMember()">Ajouter l'adhérent</button>
   </div>
@@ -696,7 +475,7 @@ function viewAdherents(){
   <div class="card">
     <h2>Importer des adhérents (CSV)</h2>
     <div style="font-size:12.5px;color:var(--ink-dim);margin-bottom:8px;line-height:1.4">
-      Colonnes attendues : <strong>Nom, Prénom, Téléphone, Type, Équipe</strong>. Type = "joueur" ou "entraineur". Les équipes inconnues sont créées automatiquement. La 1ère ligne peut être un en-tête. Nom, prénom et téléphone sont obligatoires pour chaque ligne.
+      Colonnes attendues : <strong>Nom, Type, Équipe</strong>. Type = "joueur" ou "entraineur". Les équipes inconnues sont créées automatiquement. La 1ère ligne peut être un en-tête.
     </div>
     <input id="csvImportInput" type="file" accept=".csv,text/csv" style="width:100%;background:var(--surface-2);border:1px solid var(--line);color:var(--ink);padding:9px 10px;border-radius:7px;font-size:13px;font-family:'Inter',sans-serif;">
     <button class="btn" onclick="importMembersCSV()">Importer le fichier</button>
@@ -711,16 +490,7 @@ function viewAdherents(){
 }
 function memberRow(m){
   const typeLabel = m.type==='entraineur' ? 'Entraîneur' : 'Joueur';
-  return `<div class="row">
-    <span>
-      <div>${escapeHtml(fullName(m))} <span class="tag">${typeLabel}</span></div>
-      ${m.telephone ? `<div style="font-size:11.5px;color:var(--ink-dim);margin-top:2px">${escapeHtml(m.telephone)}</div>` : ''}
-    </span>
-    <span style="display:flex;gap:4px;flex-shrink:0">
-      <button class="del" style="color:var(--gold)" onclick="openEditMember('${m.id}')">Modifier</button>
-      <button class="del" onclick="deleteMember('${m.id}')">Supprimer</button>
-    </span>
-  </div>`;
+  return `<div class="row"><span>${escapeHtml(m.name)} <span class="tag">${typeLabel}</span></span><span style="display:flex;gap:4px;flex-shrink:0"><button class="del" style="color:var(--gold)" onclick="openEditMember('${m.id}')">Modifier</button><button class="del" onclick="deleteMember('${m.id}')">Supprimer</button></span></div>`;
 }
 function setMemberType(t){ newMemberType = t; renderMain(); }
 
@@ -741,15 +511,13 @@ async function deleteTeam(name){
   renderMain();
 }
 async function addMember(){
-  const nom = document.getElementById('memberNom').value.trim();
-  const prenom = document.getElementById('memberPrenom').value.trim();
-  const telephone = document.getElementById('memberTelephone').value.trim();
-  if(!nom || !prenom || !telephone){ await showAlert('Le nom, le prénom et le téléphone de contact sont obligatoires.'); return; }
+  const nameInput = document.getElementById('memberName');
+  const name = nameInput.value.trim();
+  if(!name) return;
   const sel = document.getElementById('memberTeam');
   if(!sel || !sel.value){ await showAlert(roster.teams.length ? 'Choisissez une équipe.' : 'Créez d\'abord une équipe.'); return; }
   const team = sel.value;
-  lastMemberTeam = team;
-  roster.members.push({ id: uid(), nom, prenom, telephone, type: newMemberType, team });
+  roster.members.push({ id: uid(), name, type: newMemberType, team });
   await setJSON('club:roster', roster);
   renderMain();
 }
@@ -771,12 +539,8 @@ function openEditMember(id){
     root.innerHTML = `<div class="modal-overlay" id="editOverlay">
       <div class="modal-box">
         <h2 style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:0.5px;margin:0 0 4px;color:var(--gold)">Modifier l'adhérent</h2>
-        <label for="editNom">Nom</label>
-        <input id="editNom" type="text" value="${escapeHtml(m.nom||'')}">
-        <label for="editPrenom">Prénom</label>
-        <input id="editPrenom" type="text" value="${escapeHtml(m.prenom||'')}">
-        <label for="editTelephone">Téléphone de contact</label>
-        <input id="editTelephone" type="tel" value="${escapeHtml(m.telephone||'')}">
+        <label for="editName">Nom</label>
+        <input id="editName" type="text" value="${escapeHtml(m.name)}">
         <div class="radio-row">
           <label class="${editType==='joueur'?'checked':''}" onclick="setEditType('joueur')">
             <input type="radio" name="etype" ${editType==='joueur'?'checked':''} style="width:auto"> Joueur
@@ -806,15 +570,14 @@ function openEditMember(id){
 }
 
 async function saveEditMember(id, type){
-  const nom = document.getElementById('editNom').value.trim();
-  const prenom = document.getElementById('editPrenom').value.trim();
-  const telephone = document.getElementById('editTelephone').value.trim();
-  if(!nom || !prenom || !telephone){ await showAlert('Le nom, le prénom et le téléphone de contact sont obligatoires.'); return; }
+  const nameInput = document.getElementById('editName');
+  const name = nameInput.value.trim();
+  if(!name){ await showAlert('Le nom est obligatoire.'); return; }
   const sel = document.getElementById('editTeam');
   const team = sel && sel.value ? sel.value : null;
   const idx = roster.members.findIndex(m=>m.id===id);
   if(idx===-1) return;
-  roster.members[idx] = { ...roster.members[idx], nom, prenom, telephone, type, team };
+  roster.members[idx] = { ...roster.members[idx], name, type, team };
   await setJSON('club:roster', roster);
   document.getElementById('modalRoot').innerHTML = '';
   renderMain();
@@ -863,31 +626,25 @@ async function importMembersCSV(){
   if(headerLower[0]==='nom' || headerLower.includes('nom')) startIdx = 1;
 
   let imported = 0;
-  let skipped = 0;
   for(let i=startIdx;i<rows.length;i++){
     const row = rows[i];
-    const nom = (row[0]||'').trim();
-    const prenom = (row[1]||'').trim();
-    const telephone = (row[2]||'').trim();
-    if(!nom && !prenom && !telephone) continue;
-    if(!nom || !prenom || !telephone){ skipped++; continue; }
-    const typeRaw = (row[3]||'joueur').trim().toLowerCase();
+    const name = (row[0]||'').trim();
+    if(!name) continue;
+    const typeRaw = (row[1]||'joueur').trim().toLowerCase();
     const type = (typeRaw.startsWith('entra') || typeRaw==='coach') ? 'entraineur' : 'joueur';
-    const teamNameRaw = (row[4]||'').trim();
+    const teamNameRaw = (row[2]||'').trim();
     let team = null;
     if(teamNameRaw){
       if(!roster.teams.includes(teamNameRaw)) roster.teams.push(teamNameRaw);
       team = teamNameRaw;
     }
-    roster.members.push({ id: uid(), nom, prenom, telephone, type, team });
+    roster.members.push({ id: uid(), name, type, team });
     imported++;
   }
   await setJSON('club:roster', roster);
   input.value = '';
   renderMain();
-  let msg = imported > 0 ? `${imported} adhérent(s) importé(s).` : 'Aucun adhérent valide trouvé dans le fichier.';
-  if(skipped > 0) msg += ` ${skipped} ligne(s) ignorée(s) (nom, prénom ou téléphone manquant).`;
-  await showAlert(msg);
+  await showAlert(imported > 0 ? `${imported} adhérent(s) importé(s).` : 'Aucun adhérent valide trouvé dans le fichier.');
 }
 
 
@@ -905,10 +662,7 @@ function viewEntrainements(){
         <div style="font-size:12px;color:var(--ink-dim)">${escapeHtml(tr.team)}${tr.label?' · '+escapeHtml(tr.label):''}</div>
       </div>
       <div class="score">${present}/${concerned.length}</div>
-      <span style="display:flex;gap:4px;flex-shrink:0;margin-left:8px">
-        <button class="del" style="color:var(--gold)" onclick="event.stopPropagation(); openEditTraining('${tr.id}')">Modifier</button>
-        <button class="del" onclick="event.stopPropagation(); deleteTraining('${tr.id}')">Supprimer</button>
-      </span>
+      <button class="del" onclick="event.stopPropagation(); deleteTraining('${tr.id}')" style="margin-left:8px">Supprimer</button>
     </div>`;
   }).join('') : '<div class="empty">Aucun entraînement enregistré.</div>';
 
@@ -966,46 +720,6 @@ async function deleteTraining(id){
   if(selectedTraining===id) selectedTraining = null;
   renderMain();
 }
-function openEditTraining(id){
-  const tr = trainings.find(t=>t.id===id);
-  if(!tr) return;
-  const root = document.getElementById('modalRoot');
-  const teamOptions = roster.teams.map(t=>`<option value="${escapeHtml(t)}" ${t===tr.team?'selected':''}>${escapeHtml(t)}</option>`).join('');
-  root.innerHTML = `<div class="modal-overlay" id="trainingOverlay">
-    <div class="modal-box">
-      <h2 style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:0.5px;margin:0 0 4px;color:var(--gold)">Modifier l'entraînement</h2>
-      <label for="editTrDate">Date</label>
-      <input id="editTrDate" type="date" value="${escapeHtml(tr.date)}">
-      <label for="editTrTeam">Équipe concernée</label>
-      <select id="editTrTeam">
-        <option value="Tous" ${tr.team==='Tous'?'selected':''}>Tous les adhérents</option>
-        ${teamOptions}
-      </select>
-      <label for="editTrLabel">Précision (facultatif)</label>
-      <input id="editTrLabel" type="text" value="${escapeHtml(tr.label||'')}" placeholder="Ex. Séance physique">
-      <div class="modal-actions" style="margin-top:16px">
-        <button class="btn-cancel" id="trainingCancel">Annuler</button>
-        <button class="btn-ok" id="trainingSave">Enregistrer</button>
-      </div>
-    </div>
-  </div>`;
-  const close = ()=>{ root.innerHTML=''; };
-  document.getElementById('trainingCancel').onclick = close;
-  document.getElementById('trainingSave').onclick = ()=> saveEditTraining(id);
-  root.querySelector('.modal-overlay').onclick = (e)=>{ if(e.target===root.querySelector('.modal-overlay')) close(); };
-}
-async function saveEditTraining(id){
-  const date = document.getElementById('editTrDate').value;
-  const team = document.getElementById('editTrTeam').value;
-  const label = document.getElementById('editTrLabel').value.trim();
-  if(!date){ await showAlert('Choisissez une date.'); return; }
-  const idx = trainings.findIndex(t=>t.id===id);
-  if(idx===-1) return;
-  trainings[idx] = { ...trainings[idx], date, team, label };
-  await setJSON('club:trainings', trainings);
-  document.getElementById('modalRoot').innerHTML = '';
-  renderMain();
-}
 function goToPresence(id){
   selectedTraining = id;
   currentTab = 'presences';
@@ -1026,7 +740,7 @@ function memberStatsList(){
     const pct = total ? Math.round(present/total*100) : null;
     return { ...m, total, present, pct };
   }).sort((a,b)=>{
-    if(a.pct===null && b.pct===null) return fullName(a).localeCompare(fullName(b));
+    if(a.pct===null && b.pct===null) return a.name.localeCompare(b.name);
     if(a.pct===null) return 1;
     if(b.pct===null) return -1;
     return a.pct - b.pct;
@@ -1065,8 +779,8 @@ function viewStats(){
 
   const memberRows = ms.length ? ms.map(m=>`
     <div class="attend-row">
-      <div class="avatar">${initials(fullName(m))}</div>
-      <div class="attend-name" style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px" onclick="openMemberHistory('${m.id}')">${escapeHtml(fullName(m))}${m.team?` <span class="tag">${escapeHtml(m.team)}</span>`:''}</div>
+      <div class="avatar">${initials(m.name)}</div>
+      <div class="attend-name" style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px" onclick="openMemberHistory('${m.id}')">${escapeHtml(m.name)}${m.team?` <span class="tag">${escapeHtml(m.team)}</span>`:''}</div>
       <div style="width:130px;display:flex;align-items:center;gap:8px">
         <div style="flex:1;height:7px;background:var(--surface-2);border-radius:4px;overflow:hidden">
           <div style="width:${m.pct??0}%;height:100%;background:${barColor(m.pct)}"></div>
@@ -1108,7 +822,7 @@ function openTeamHistory(teamName){
       const color = state===true ? 'var(--present)' : state===false ? 'var(--absent)' : 'var(--ink-dim)';
       const label = state===true ? 'Présent' : state===false ? 'Absent' : 'Non renseigné';
       return `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:13px">
-        <span>${escapeHtml(fullName(m))}</span>
+        <span>${escapeHtml(m.name)}</span>
         <span style="color:${color};font-weight:700;font-size:10.5px;text-transform:uppercase;letter-spacing:0.3px">${label}</span>
       </div>`;
     }).join('') : '<div class="empty">Aucun adhérent dans cette équipe.</div>';
@@ -1171,9 +885,9 @@ function openMemberHistory(id){
 
   root.innerHTML = `<div class="modal-overlay" id="historyOverlay">
     <div class="modal-box" style="max-width:420px;max-height:82vh;display:flex;flex-direction:column">
-      <h2 style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:0.5px;margin:0 0 2px;color:var(--gold)">${escapeHtml(fullName(m))}</h2>
+      <h2 style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:0.5px;margin:0 0 2px;color:var(--gold)">${escapeHtml(m.name)}</h2>
       <div style="font-size:12.5px;color:var(--ink-dim);margin-bottom:10px">
-        ${m.type==='entraineur'?'Entraîneur':'Joueur'}${m.team?' · '+escapeHtml(m.team):''}${m.telephone?' · '+escapeHtml(m.telephone):''} — ${pct===null?'Aucune donnée':present+'/'+total+' présences ('+pct+'%)'}
+        ${m.type==='entraineur'?'Entraîneur':'Joueur'}${m.team?' · '+escapeHtml(m.team):''} — ${pct===null?'Aucune donnée':present+'/'+total+' présences ('+pct+'%)'}
       </div>
       <div style="overflow-y:auto;flex:1;margin:0 -20px;padding:0 20px">
         ${rowsHtml}
@@ -1204,16 +918,16 @@ function downloadCSV(filename, rows){
   URL.revokeObjectURL(url);
 }
 function exportMembers(){
-  const rows = [['Nom','Prénom','Téléphone','Type','Équipe']];
-  roster.members.forEach(m=> rows.push([m.nom||'', m.prenom||'', m.telephone||'', m.type, m.team||'']));
+  const rows = [['Nom','Type','Équipe']];
+  roster.members.forEach(m=> rows.push([m.name, m.type, m.team||'']));
   downloadCSV('adherents.csv', rows);
 }
 function exportAttendance(){
-  const rows = [['Date','Entraînement (équipe)','Nom','Prénom','Type','Présent']];
+  const rows = [['Date','Entraînement (équipe)','Nom','Type','Présent']];
   [...trainings].sort((a,b)=>a.date.localeCompare(b.date)).forEach(tr=>{
     concernedMembers(tr).forEach(m=>{
       const state = (attendance[tr.id]||{})[m.id];
-      rows.push([tr.date, tr.team, m.nom||'', m.prenom||'', m.type, state===true?'Oui':(state===false?'Non':'')]);
+      rows.push([tr.date, tr.team, m.name, m.type, state===true?'Oui':(state===false?'Non':'')]);
     });
   });
   downloadCSV('presences.csv', rows);
@@ -1246,8 +960,8 @@ function viewPresences(){
     const rows = concerned.length ? concerned.map(m=>{
       const state = att[m.id];
       return `<div class="attend-row">
-        <div class="avatar">${initials(fullName(m))}</div>
-        <div class="attend-name">${escapeHtml(fullName(m))}</div>
+        <div class="avatar">${initials(m.name)}</div>
+        <div class="attend-name">${escapeHtml(m.name)}</div>
         <div class="toggle">
           <button class="${state===true?'on-present':''}" onclick="setAttendance('${tr.id}','${m.id}',true)">Présent</button>
           <button class="${state===false?'on-absent':''}" onclick="setAttendance('${tr.id}','${m.id}',false)">Absent</button>
