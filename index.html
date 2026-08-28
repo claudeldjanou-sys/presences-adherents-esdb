@@ -6,6 +6,9 @@
 <title>Feuille de présences au club</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
 <style>
   :root{
     --bg:#0A0A0A;
@@ -322,6 +325,11 @@
 <header>
   <h1>FEUILLE DE PRÉSENCES AU CLUB</h1>
   <div class="sub">Adhérents · équipes · présences aux entraînements</div>
+  <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+    <button class="btn" style="margin-top:0;flex:1;min-width:140px" onclick="backupData()">⬇ Sauvegarde</button>
+    <button class="btn btn-ghost" style="margin-top:0;flex:1;min-width:140px" onclick="document.getElementById('restoreInput').click()">⬆ Restauration</button>
+    <input id="restoreInput" type="file" accept=".zip,application/zip" style="display:none" onchange="restoreData(this)">
+  </div>
 </header>
 <nav id="nav"></nav>
 <main id="app"><div class="loading">Chargement…</div></main>
@@ -349,6 +357,11 @@ async function setJSON(key, val){
   }catch(e){ console.error('Erreur de sauvegarde', e); await showAlert("Impossible d'enregistrer les données (stockage local plein ou bloqué par le navigateur)."); }
 }
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+function openDatePicker(el){
+  if(el && typeof el.showPicker === 'function'){
+    try{ el.showPicker(); }catch(e){ /* ignoré : nécessite parfois un vrai geste utilisateur */ }
+  }
+}
 
 function showConfirm(message){
   return new Promise(resolve=>{
@@ -404,10 +417,10 @@ function renderNav(){
 function setTab(id){ currentTab = id; renderNav(); renderMain(); }
 
 function membersOf(teamName){
-  return roster.members.filter(m => m.team===teamName);
+  return roster.members.filter(m => m.team===teamName).sort((a,b)=>a.name.localeCompare(b.name, 'fr', {sensitivity:'base'}));
 }
 function unassigned(){
-  return roster.members.filter(m => !m.team);
+  return roster.members.filter(m => !m.team).sort((a,b)=>a.name.localeCompare(b.name, 'fr', {sensitivity:'base'}));
 }
 function initials(name){
   return name.trim().split(/\s+/).map(p=>p[0]).slice(0,2).join('').toUpperCase();
@@ -453,6 +466,11 @@ function viewAdherents(){
   </div>
 
   <div class="card">
+    <h2>Liste des adhérents</h2>
+    ${membersHtml}
+  </div>
+
+  <div class="card">
     <h2>Ajouter un adhérent</h2>
     <label for="memberName">Nom</label>
     <input id="memberName" type="text" placeholder="Nom et prénom">
@@ -479,11 +497,6 @@ function viewAdherents(){
     </div>
     <input id="csvImportInput" type="file" accept=".csv,text/csv" style="width:100%;background:var(--surface-2);border:1px solid var(--line);color:var(--ink);padding:9px 10px;border-radius:7px;font-size:13px;font-family:'Inter',sans-serif;">
     <button class="btn" onclick="importMembersCSV()">Importer le fichier</button>
-  </div>
-
-  <div class="card">
-    <h2>Liste des adhérents</h2>
-    ${membersHtml}
   </div>
   <div class="note">Données enregistrées dans ce navigateur, sur cet appareil.</div>
   `;
@@ -647,6 +660,107 @@ async function importMembersCSV(){
   await showAlert(imported > 0 ? `${imported} adhérent(s) importé(s).` : 'Aucun adhérent valide trouvé dans le fichier.');
 }
 
+function normalizeHeader(h){
+  return (h||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+}
+function parseFlexibleDate(raw){
+  raw = (raw||'').trim();
+  if(/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const m = raw.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  if(m){
+    const [,d,mo,y] = m;
+    return `${y}-${mo.padStart(2,'0')}-${d.padStart(2,'0')}`;
+  }
+  return null;
+}
+function parsePresentValue(raw){
+  const v = (raw||'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+  if(['oui','yes','true','vrai','present','1','x'].includes(v)) return true;
+  if(['non','no','false','faux','absent','0'].includes(v) || v==='') return false;
+  return null;
+}
+async function importAttendanceCSV(){
+  const input = document.getElementById('attendanceImportInput');
+  const file = input.files && input.files[0];
+  if(!file){ await showAlert('Choisissez d\'abord un fichier CSV.'); return; }
+  let text;
+  try{ text = await file.text(); }
+  catch(e){ await showAlert('Impossible de lire ce fichier.'); return; }
+  const rows = parseCSV(text);
+  if(rows.length===0){ await showAlert('Fichier CSV vide.'); return; }
+
+  let startIdx = 0;
+  let colDate=0, colTeam=1, colName=2, colType=-1, colPresent=3;
+  const headerCandidates = rows[0].map(normalizeHeader);
+  const looksLikeHeader = headerCandidates.some(h=>['date','nom','equipe','present','joueur','adherent'].some(k=>h.includes(k)));
+  if(looksLikeHeader){
+    startIdx = 1;
+    headerCandidates.forEach((h,idx)=>{
+      if(h.includes('date')) colDate = idx;
+      else if(h.includes('equipe') || h.includes('entrainement')) colTeam = idx;
+      else if(h.includes('type')) colType = idx;
+      else if(h.includes('present')) colPresent = idx;
+      else if(h.includes('nom') || h.includes('joueur') || h.includes('adherent')) colName = idx;
+    });
+  }else if(rows[0].length>=5){
+    colDate=0; colTeam=1; colName=2; colType=3; colPresent=4;
+  }
+
+  let recordsImported = 0, skipped = 0, membersCreated = 0, teamsCreated = 0;
+  const touchedTrainingIds = new Set();
+  const newTrainingIds = new Set();
+
+  for(let i=startIdx;i<rows.length;i++){
+    const row = rows[i];
+    if(row.length===0 || row.every(c=>!c)) continue;
+    const date = parseFlexibleDate(row[colDate]);
+    const team = (row[colTeam]||'').trim();
+    const name = (row[colName]||'').trim();
+    const present = parsePresentValue(row[colPresent]);
+    if(!date || !team || !name){ skipped++; continue; }
+
+    if(!roster.teams.includes(team)){ roster.teams.push(team); teamsCreated++; }
+
+    let member = roster.members.find(m=>m.name.trim().toLowerCase()===name.toLowerCase());
+    if(!member){
+      const typeRaw = colType>=0 ? (row[colType]||'joueur').trim().toLowerCase() : 'joueur';
+      const type = (typeRaw.startsWith('entra') || typeRaw==='coach') ? 'entraineur' : 'joueur';
+      member = { id: uid(), name, type, team };
+      roster.members.push(member);
+      membersCreated++;
+    }
+
+    let training = trainings.find(t=>t.date===date && t.team===team);
+    if(!training){
+      training = { id: uid(), date, team, label: 'Importé' };
+      trainings.push(training);
+      newTrainingIds.add(training.id);
+    }
+    touchedTrainingIds.add(training.id);
+
+    if(!attendance[training.id]) attendance[training.id] = {};
+    if(present !== null){
+      attendance[training.id][member.id] = present;
+      recordsImported++;
+    }
+  }
+
+  await setJSON('club:roster', roster);
+  await setJSON('club:trainings', trainings);
+  await setJSON('club:attendance', attendance);
+  input.value = '';
+  renderMain();
+
+  let msg = recordsImported > 0
+    ? `${recordsImported} présence(s) importée(s) sur ${touchedTrainingIds.size} séance(s) (dont ${newTrainingIds.size} nouvelle(s)).`
+    : 'Aucune présence valide trouvée dans le fichier.';
+  if(membersCreated>0) msg += ` ${membersCreated} adhérent(s) créé(s) automatiquement.`;
+  if(teamsCreated>0) msg += ` ${teamsCreated} équipe(s) créée(s) automatiquement.`;
+  if(skipped>0) msg += ` ${skipped} ligne(s) ignorée(s) (date, équipe ou nom manquant/invalide).`;
+  await showAlert(msg);
+}
+
+
 
 // ---------- ENTRAINEMENTS ----------
 function viewEntrainements(){
@@ -668,15 +782,19 @@ function viewEntrainements(){
 
   return `
   <div class="card">
+    <h2>Entraînements</h2>
+    ${listHtml}
+  </div>
+  <div class="card">
     <h2>Nouvel entraînement</h2>
     <label for="trDate">Date</label>
     <div style="display:flex;gap:8px">
-      <input id="trDate" type="date" style="flex:1">
+      <input id="trDate" type="date" style="flex:1" onclick="openDatePicker(this)">
       <button type="button" class="btn btn-ghost" style="margin-top:0;white-space:nowrap" onclick="setDateToday()">Aujourd'hui</button>
     </div>
     <label for="trTeam">Équipe concernée</label>
     <select id="trTeam">
-      <option value="Tous">Tous les adhérents</option>
+      <option value="Tous">Toutes les équipes</option>
       ${teamOptions}
     </select>
     <label for="trLabel">Précision (facultatif)</label>
@@ -684,8 +802,12 @@ function viewEntrainements(){
     <button class="btn" onclick="addTraining()">Créer l'entraînement</button>
   </div>
   <div class="card">
-    <h2>Entraînements</h2>
-    ${listHtml}
+    <h2>Importer des statistiques de présence (CSV)</h2>
+    <div style="font-size:12.5px;color:var(--ink-dim);margin-bottom:8px;line-height:1.4">
+      Colonnes attendues : <strong>Date, Équipe, Nom, Présent</strong> (une colonne "Type" est acceptée en plus, entre Nom et Présent). Dates au format JJ/MM/AAAA ou AAAA-MM-JJ. Présent = "Oui"/"Non" (ou Vrai/Faux, 1/0). Les séances, équipes et adhérents manquants sont créés automatiquement. La 1ère ligne peut être un en-tête.
+    </div>
+    <input id="attendanceImportInput" type="file" accept=".csv,text/csv" style="width:100%;background:var(--surface-2);border:1px solid var(--line);color:var(--ink);padding:9px 10px;border-radius:7px;font-size:13px;font-family:'Inter',sans-serif;">
+    <button class="btn" onclick="importAttendanceCSV()">Importer le fichier</button>
   </div>
   `;
 }
@@ -739,20 +861,16 @@ function memberStatsList(){
     });
     const pct = total ? Math.round(present/total*100) : null;
     return { ...m, total, present, pct };
-  }).sort((a,b)=>{
-    if(a.pct===null && b.pct===null) return a.name.localeCompare(b.name);
-    if(a.pct===null) return 1;
-    if(b.pct===null) return -1;
-    return a.pct - b.pct;
-  });
+  }).sort((a,b)=>a.name.localeCompare(b.name, 'fr', {sensitivity:'base'}));
 }
 function teamStatsList(){
   return roster.teams.map(t=>{
     const ms = memberStatsList().filter(m=>m.team===t && m.total>0);
     const avg = ms.length ? Math.round(ms.reduce((s,m)=>s+m.pct,0)/ms.length) : null;
     return { team:t, avg, count: membersOf(t).length };
-  });
+  }).sort((a,b)=>a.team.localeCompare(b.team, 'fr', {sensitivity:'base'}));
 }
+
 function barColor(pct){
   if(pct===null) return 'var(--line)';
   if(pct>=75) return 'var(--present)';
@@ -797,6 +915,18 @@ function viewStats(){
   <div class="card">
     <h2>Présence par adhérent</h2>
     ${memberRows}
+  </div>
+  <div class="card">
+    <h2>Rapport de présence (PDF)</h2>
+    <label for="reportTeam">Équipe</label>
+    <select id="reportTeam">
+      ${roster.teams.map(t=>`<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('') || '<option value="">Aucune équipe</option>'}
+    </select>
+    <label for="reportStart">Date de début (facultatif)</label>
+    <input id="reportStart" type="date" onclick="openDatePicker(this)">
+    <label for="reportEnd">Date de fin (facultatif)</label>
+    <input id="reportEnd" type="date" onclick="openDatePicker(this)">
+    <button class="btn" onclick="generateReport()">Générer le rapport PDF</button>
   </div>
   <div class="card">
     <h2>Export</h2>
@@ -931,6 +1061,348 @@ function exportAttendance(){
     });
   });
   downloadCSV('presences.csv', rows);
+}
+
+// ---------- RAPPORT PDF ----------
+function formatDateSlash(d){
+  const dt = new Date(d+'T00:00:00');
+  const pad = n => String(n).padStart(2,'0');
+  return `${pad(dt.getDate())}/${pad(dt.getMonth()+1)}/${dt.getFullYear()}`;
+}
+function fmtPct(n){
+  return n.toFixed(1).replace('.', ',');
+}
+async function generateReport(){
+  try{
+    await generateReportInner();
+  }catch(e){
+    console.error('Erreur génération PDF', e);
+    await showAlert("La génération du PDF a échoué : " + (e && e.message ? e.message : e));
+  }
+}
+async function generateReportInner(){
+  const teamSel = document.getElementById('reportTeam');
+  const team = teamSel ? teamSel.value : '';
+  if(!team){ await showAlert('Choisissez une équipe.'); return; }
+  const startVal = document.getElementById('reportStart').value;
+  const endVal = document.getElementById('reportEnd').value;
+
+  let relevant = trainings.filter(tr => tr.team===team || tr.team==='Tous');
+  if(startVal) relevant = relevant.filter(tr => tr.date >= startVal);
+  if(endVal) relevant = relevant.filter(tr => tr.date <= endVal);
+  relevant = relevant.slice().sort((a,b)=>a.date.localeCompare(b.date));
+
+  if(relevant.length===0){ await showAlert("Aucun entraînement trouvé pour cette équipe sur la période choisie."); return; }
+
+  const players = membersOf(team).filter(m=>m.type==='joueur');
+  if(players.length===0){ await showAlert("Aucun joueur enregistré dans cette équipe."); return; }
+
+  // Stats par séance
+  const sessions = relevant.map(tr=>{
+    const att = attendance[tr.id] || {};
+    let present=0, absent=0;
+    players.forEach(p=>{
+      const st = att[p.id];
+      if(st===true) present++;
+      else if(st===false) absent++;
+    });
+    const total = present+absent;
+    return {
+      date: tr.date,
+      present, absent,
+      pctPresent: total ? present/total*100 : null,
+      pctAbsent: total ? absent/total*100 : null
+    };
+  });
+
+  const totalPresent = sessions.reduce((s,x)=>s+x.present,0);
+  const totalAbsent = sessions.reduce((s,x)=>s+x.absent,0);
+  const totalMarked = totalPresent+totalAbsent;
+  const avgPresent = totalMarked ? totalPresent/totalMarked*100 : null;
+  const avgAbsent = totalMarked ? totalAbsent/totalMarked*100 : null;
+
+  // Stats par joueur
+  const playerStats = players.map(p=>{
+    let presences=0, absences=0;
+    relevant.forEach(tr=>{
+      const st = (attendance[tr.id]||{})[p.id];
+      if(st===true) presences++;
+      else if(st===false) absences++;
+    });
+    const total = presences+absences;
+    return { name: p.name, presences, absences, pct: total ? presences/total*100 : null };
+  }).sort((a,b)=>{
+    if(a.pct===null && b.pct===null) return a.name.localeCompare(b.name);
+    if(a.pct===null) return 1;
+    if(b.pct===null) return -1;
+    if(b.pct !== a.pct) return b.pct - a.pct;
+    return a.name.localeCompare(b.name);
+  });
+
+  // Points clés
+  const keyPoints = [];
+  if(avgPresent!==null){
+    let qualifier;
+    if(avgPresent>=85) qualifier = 'Participation excellente';
+    else if(avgPresent>=70) qualifier = 'Participation satisfaisante';
+    else if(avgPresent>=50) qualifier = 'Participation moyenne, satisfaisante mais perfectible';
+    else qualifier = 'Participation faible, une vigilance particulière est recommandée';
+    keyPoints.push(`${qualifier} (${fmtPct(avgPresent)} %).`);
+  }
+  const perfect = playerStats.filter(p=>p.pct===100).length;
+  if(perfect>0){
+    keyPoints.push(`${perfect} joueur${perfect>1?'s ont':' a'} participé à toutes les séances.`);
+  }
+  if(sessions.length>=2){
+    const last = sessions[sessions.length-1];
+    const prev = sessions[sessions.length-2];
+    if(last.pctPresent!==null && prev.pctPresent!==null){
+      if(last.pctPresent > prev.pctPresent){
+        keyPoints.push(`La séance du ${formatDateSlash(last.date)} présente une amélioration de la fréquentation par rapport à la précédente.`);
+      }else if(last.pctPresent < prev.pctPresent){
+        keyPoints.push(`La séance du ${formatDateSlash(last.date)} présente une baisse de la fréquentation par rapport à la précédente.`);
+      }else{
+        keyPoints.push(`La séance du ${formatDateSlash(last.date)} présente une fréquentation stable par rapport à la précédente.`);
+      }
+    }
+  }
+
+  if(!window.jspdf){ await showAlert("La librairie de génération PDF n'a pas pu être chargée (vérifiez votre connexion internet)."); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const goldRGB = [232,172,46];
+  const inkRGB = [26,20,5];
+
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(16);
+  doc.text(`Rapport de présences - Équipe ${team}`, 14, 18);
+
+  doc.setFont('helvetica','normal');
+  doc.setFontSize(11);
+  const periodeLabel = `Période analysée : ${formatDateSlash(sessions[0].date)} au ${formatDateSlash(sessions[sessions.length-1].date)}`;
+  doc.text(periodeLabel, 14, 26);
+
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(13);
+  doc.text('Synthèse générale', 14, 36);
+
+  doc.setFont('helvetica','normal');
+  doc.setFontSize(11);
+  const synthText = `Effectif joueurs observé : ${players.length} joueurs. ${sessions.length} séance${sessions.length>1?'s':''} d'entraînement ${sessions.length>1?'ont':'a'} été analysée${sessions.length>1?'s':''}.\nPrésences totales : ${totalPresent}. Absences totales : ${totalAbsent}. Taux moyen de présence : ${avgPresent===null?'—':fmtPct(avgPresent)+' %'}. Taux moyen d'absence : ${avgAbsent===null?'—':fmtPct(avgAbsent)+' %'}.`;
+  const synthLines = doc.splitTextToSize(synthText, 180);
+  doc.text(synthLines, 14, 44);
+
+  let y = 44 + synthLines.length*5.5 + 6;
+
+  doc.autoTable({
+    startY: y,
+    head: [['Date','Présents','Absents','Taux présence','Taux absence']],
+    body: sessions.map(s=>[
+      formatDateSlash(s.date), s.present, s.absent,
+      s.pctPresent===null?'—':fmtPct(s.pctPresent)+' %',
+      s.pctAbsent===null?'—':fmtPct(s.pctAbsent)+' %'
+    ]),
+    theme:'grid',
+    headStyles:{ fillColor: goldRGB, textColor: inkRGB, fontStyle:'bold' },
+    styles:{ fontSize:10 },
+    margin:{ left:14, right:14 }
+  });
+
+  y = doc.lastAutoTable.finalY + 10;
+  doc.setFont('helvetica','bold'); doc.setFontSize(13);
+  doc.text('Assiduité individuelle', 14, y);
+
+  doc.autoTable({
+    startY: y+4,
+    head: [['Joueur','Présences','Absences','Taux présence']],
+    body: playerStats.map(p=>[p.name, p.presences, p.absences, p.pct===null?'—':fmtPct(p.pct)+' %']),
+    theme:'grid',
+    headStyles:{ fillColor: goldRGB, textColor: inkRGB, fontStyle:'bold' },
+    styles:{ fontSize:10 },
+    margin:{ left:14, right:14 }
+  });
+
+  y = doc.lastAutoTable.finalY + 10;
+  if(y > 260){ doc.addPage(); y = 20; }
+  doc.setFont('helvetica','bold'); doc.setFontSize(13);
+  doc.text('Points clés', 14, y);
+  y += 8;
+  doc.setFont('helvetica','normal'); doc.setFontSize(11);
+  keyPoints.forEach(pt=>{
+    const lines = doc.splitTextToSize('- '+pt, 180);
+    if(y + lines.length*6 > 285){ doc.addPage(); y = 20; }
+    doc.text(lines, 14, y);
+    y += lines.length*6;
+  });
+
+  // ---- Page : tableau de présence détaillé (adhérents x dates) ----
+  const matrixPlayers = players.slice().sort((a,b)=>a.name.localeCompare(b.name, 'fr', {sensitivity:'base'}));
+  const presenceMatrix = matrixPlayers.map(p => relevant.map(tr => {
+    const st = (attendance[tr.id]||{})[p.id];
+    return st===true ? true : (st===false ? false : null);
+  }));
+
+  doc.addPage('a4', 'landscape');
+  doc.setFont('helvetica','bold'); doc.setFontSize(16);
+  doc.text(`Tableau de présence détaillé - Équipe ${team}`, 14, 16);
+  doc.setFont('helvetica','normal'); doc.setFontSize(10);
+  doc.text('Case cochée = présence enregistrée. Case vide = absence ou séance non pointée.', 14, 23);
+
+  doc.autoTable({
+    startY: 29,
+    head: [['Adhérent', ...relevant.map(tr=>formatDateSlash(tr.date))]],
+    body: matrixPlayers.map(p=>[p.name, ...relevant.map(()=>'')]),
+    theme:'grid',
+    styles:{ fontSize:8, cellPadding:1.5, halign:'center', valign:'middle', minCellHeight:8 },
+    headStyles:{ fillColor: goldRGB, textColor: inkRGB, fontStyle:'bold', fontSize:8, halign:'center' },
+    columnStyles:{ 0:{ halign:'left', cellWidth:42, fontStyle:'bold' } },
+    horizontalPageBreak: true,
+    horizontalPageBreakRepeat: 0,
+    margin:{ left:10, right:10 },
+    didDrawCell: function(data){
+      if(data.section==='body' && data.column.index>0){
+        const present = presenceMatrix[data.row.index][data.column.index-1];
+        const size = Math.min(data.cell.width, data.cell.height) - 3.5;
+        const x = data.cell.x + (data.cell.width - size)/2;
+        const y2 = data.cell.y + (data.cell.height - size)/2;
+        doc.setDrawColor(150,150,150);
+        doc.setLineWidth(0.2);
+        doc.rect(x, y2, size, size);
+        if(present===true){
+          doc.setDrawColor(76,175,109);
+          doc.setLineWidth(0.6);
+          doc.line(x+size*0.15, y2+size*0.55, x+size*0.4, y2+size*0.85);
+          doc.line(x+size*0.4, y2+size*0.85, x+size*0.9, y2+size*0.1);
+          doc.setLineWidth(0.2);
+          doc.setDrawColor(150,150,150);
+        }
+      }
+    }
+  });
+
+  doc.save(`rapport-presences-${team.replace(/[^a-z0-9]+/gi,'_')}.pdf`);
+}
+
+
+// ---------- SAUVEGARDE / RESTAURATION ----------
+async function backupData(){
+  try{
+    if(!window.JSZip){
+      await showAlert("La librairie de sauvegarde n'a pas pu être chargée. Vérifiez votre connexion internet puis réessayez.");
+      return;
+    }
+
+    // On relit les données depuis localStorage afin de sauvegarder exactement
+    // l'état actuellement enregistré dans le navigateur.
+    const savedRoster = await getJSON('club:roster', { teams: [], members: [] });
+    const savedTrainings = await getJSON('club:trainings', []);
+    const savedAttendance = await getJSON('club:attendance', {});
+
+    const backup = {
+      format: "kali-club-backup",
+      version: 1,
+      createdAt: new Date().toISOString(),
+      data: {
+        roster: savedRoster,
+        trainings: savedTrainings,
+        attendance: savedAttendance
+      }
+    };
+
+    const zip = new JSZip();
+    zip.file("kali-club-backup.json", JSON.stringify(backup, null, 2));
+    zip.file("README.txt",
+      "Sauvegarde de la feuille de présences au club.\\n" +
+      "Le fichier contient les adhérents, équipes, entraînements et présences.\\n" +
+      "Pour restaurer : ouvrez l'application puis cliquez sur « Restauration » et sélectionnez ce fichier ZIP.\\n"
+    );
+
+    const blob = await zip.generateAsync({type:"blob", compression:"DEFLATE"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const stamp = new Date();
+    const pad = n => String(n).padStart(2,'0');
+    const filename =
+      `sauvegarde-kali-club-${stamp.getFullYear()}${pad(stamp.getMonth()+1)}${pad(stamp.getDate())}-` +
+      `${pad(stamp.getHours())}${pad(stamp.getMinutes())}${pad(stamp.getSeconds())}.zip`;
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }catch(e){
+    console.error('Erreur de sauvegarde', e);
+    await showAlert("La sauvegarde a échoué : " + (e && e.message ? e.message : e));
+  }
+}
+
+async function restoreData(input){
+  const file = input.files && input.files[0];
+  input.value = '';
+  if(!file) return;
+
+  if(!window.JSZip){
+    await showAlert("La librairie de restauration n'a pas pu être chargée. Vérifiez votre connexion internet puis réessayez.");
+    return;
+  }
+
+  if(!file.name.toLowerCase().endsWith('.zip')){
+    await showAlert("Sélectionnez un fichier de sauvegarde .zip.");
+    return;
+  }
+
+  try{
+    const zip = await JSZip.loadAsync(file);
+    const jsonFile = zip.file("kali-club-backup.json");
+    if(!jsonFile) throw new Error("Le fichier kali-club-backup.json est absent de cette sauvegarde.");
+
+    const raw = await jsonFile.async("string");
+    const backup = JSON.parse(raw);
+
+    if(!backup || backup.format !== "kali-club-backup" || !backup.data){
+      throw new Error("Ce fichier n'est pas une sauvegarde valide de l'application.");
+    }
+
+    const data = backup.data;
+    if(!data.roster || !Array.isArray(data.roster.teams) || !Array.isArray(data.roster.members)){
+      throw new Error("Les données adhérents/équipes sont invalides.");
+    }
+    if(!Array.isArray(data.trainings) || typeof data.attendance !== 'object' || data.attendance === null){
+      throw new Error("Les données entraînements/présences sont invalides.");
+    }
+
+    const dateLabel = backup.createdAt
+      ? new Date(backup.createdAt).toLocaleString('fr-FR')
+      : 'date inconnue';
+
+    const ok = await showConfirm(
+      `Restaurer cette sauvegarde créée le ${dateLabel} ?\\n\\n` +
+      "Les données actuellement présentes dans ce navigateur seront remplacées."
+    );
+    if(!ok) return;
+
+    roster = data.roster;
+    trainings = data.trainings;
+    attendance = data.attendance;
+
+    await setJSON('club:roster', roster);
+    await setJSON('club:trainings', trainings);
+    await setJSON('club:attendance', attendance);
+
+    selectedTraining = trainings.length
+      ? [...trainings].sort((a,b)=>b.date.localeCompare(a.date))[0].id
+      : null;
+
+    currentTab = 'adherents';
+    renderNav();
+    renderMain();
+
+    await showAlert("Restauration terminée. Toutes les données de la sauvegarde ont été réimportées.");
+  }catch(e){
+    console.error('Erreur de restauration', e);
+    await showAlert("La restauration a échoué : " + (e && e.message ? e.message : e));
+  }
 }
 
 // ---------- PRESENCES ----------
