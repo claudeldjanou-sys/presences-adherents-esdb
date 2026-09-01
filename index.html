@@ -6,9 +6,9 @@
 <title>Feuille de présences au club</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" integrity="sha384-JcnsjUPPylna1s1fvi1u12X5qjY5OL56iySh75FdtrwhO/SWXgMjoVqcKyIIWOLk" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.2/dist/jspdf.plugin.autotable.min.js" integrity="sha384-fCAW/rDWORTbQXSiB7mOg0QtQ5c+r0f544y6XoKjuVva0nMBlCpNUjiFeG5iMdS3" crossorigin="anonymous"></script>
 <style>
   :root{
     --bg:#0A0A0A;
@@ -36,6 +36,33 @@
   header{
     padding:22px 18px 14px;
     border-bottom:1px solid var(--line);
+    position:relative;
+  }
+  .logout-btn{
+    position:absolute;
+    top:16px;
+    right:16px;
+    width:34px;
+    height:34px;
+    border-radius:8px;
+    border:1px solid var(--line);
+    background:var(--surface-2);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+    padding:0;
+  }
+  .logout-btn:hover{
+    border-color:var(--gold);
+  }
+  .logout-btn svg{
+    width:17px;
+    height:17px;
+    stroke:var(--ink-dim);
+  }
+  .logout-btn:hover svg{
+    stroke:var(--gold);
   }
   h1{
     font-family:'Bebas Neue',sans-serif;
@@ -262,6 +289,24 @@
     text-align:center;
     margin-top:18px;
   }
+  .lock-screen{
+    position:fixed;
+    inset:0;
+    background:var(--bg);
+    z-index:1000;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:24px;
+  }
+  .lock-box{
+    width:100%;
+    max-width:340px;
+    text-align:center;
+  }
+  .lock-box label{
+    text-align:left;
+  }
   .loading{
     text-align:center;
     padding:60px 0;
@@ -322,26 +367,53 @@
 </style>
 </head>
 <body>
+<div id="lockScreen" class="lock-screen">
+  <div class="lock-box">
+    <h1 style="font-size:26px;margin-bottom:4px">FEUILLE DE PRÉSENCES AU CLUB</h1>
+    <div class="sub" style="margin-bottom:20px">Accès réservé aux personnes autorisées du club</div>
+    <label for="lockPassword">Mot de passe</label>
+    <input id="lockPassword" type="password" placeholder="••••••••" autocomplete="current-password">
+    <div id="lockError" style="color:var(--absent);font-size:12.5px;min-height:16px;margin-top:6px"></div>
+    <button class="btn" style="width:100%" onclick="tryUnlock()">Accéder à l'application</button>
+  </div>
+</div>
 <header>
+  <button class="logout-btn" onclick="logout()" title="Déconnexion" aria-label="Déconnexion">
+    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+      <path d="M16 17l5-5-5-5"/>
+      <path d="M21 12H9"/>
+    </svg>
+  </button>
   <h1>FEUILLE DE PRÉSENCES AU CLUB</h1>
   <div class="sub">Adhérents · équipes · présences aux entraînements</div>
-  <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
-    <button class="btn" style="margin-top:0;flex:1;min-width:140px" onclick="backupData()">⬇ Sauvegarde</button>
-    <button class="btn btn-ghost" style="margin-top:0;flex:1;min-width:140px" onclick="document.getElementById('restoreInput').click()">⬆ Restauration</button>
-    <input id="restoreInput" type="file" accept=".zip,application/zip" style="display:none" onchange="restoreData(this)">
-  </div>
+  <div class="sub" style="font-size:11px;margin-top:4px;opacity:0.75">Les données (nom, téléphone) servent uniquement au suivi des présences et ne sont accessibles qu'aux personnes autorisées du club.</div>
 </header>
 <nav id="nav"></nav>
 <main id="app"><div class="loading">Chargement…</div></main>
 <div id="modalRoot"></div>
 
 <script>
+// ===============================================================
+// Verrou d'accès (protection légère, côté client)
+// Pour changer le mot de passe : va dans l'onglet Administration,
+// utilise l'outil "Générer un hash de mot de passe", et remplace
+// la valeur ci-dessous par le hash obtenu.
+// ⚠️ Ceci est une protection temporaire et symbolique : le code
+// de la page reste public, une personne déterminée et technique
+// peut la contourner. Pour un vrai contrôle d'accès, héberger
+// l'application derrière un service d'authentification (ex.
+// Cloudflare Access) est recommandé.
+// ===============================================================
+const PASSWORD_HASH = '78621545dcd213aa7d95b8e906c69dffecca712262fe15d18f415e507882661b'; // "kalisport2026" — À CHANGER
+
 let roster = { teams: [], members: [] };
 let trainings = [];
 let attendance = {};
 let currentTab = 'adherents';
 let selectedTraining = null;
 let newMemberType = 'joueur';
+let lastMemberTeam = null;
 let loaded = false;
 
 const STORAGE_PREFIX = 'kali-club:';
@@ -409,7 +481,7 @@ async function loadAll(){
 
 function renderNav(){
   const nav = document.getElementById('nav');
-  const tabs = [['adherents','Adhérents'],['entrainements','Entraînements'],['presences','Présences'],['stats','Stats']];
+  const tabs = [['adherents','Adhérents'],['entrainements','Entraînements'],['presences','Présences'],['stats','Stats'],['administration','Administration']];
   nav.innerHTML = tabs.map(([id,label]) =>
     `<button class="${currentTab===id?'active':''}" onclick="setTab('${id}')">${label}</button>`
   ).join('');
@@ -432,7 +504,45 @@ function renderMain(){
   if(currentTab==='adherents') app.innerHTML = viewAdherents();
   else if(currentTab==='entrainements') app.innerHTML = viewEntrainements();
   else if(currentTab==='presences') app.innerHTML = viewPresences();
-  else app.innerHTML = viewStats();
+  else if(currentTab==='stats') app.innerHTML = viewStats();
+  else app.innerHTML = viewAdministration();
+}
+
+// ---------- ADMINISTRATION ----------
+function viewAdministration(){
+  return `
+  <div class="card">
+    <h2>Sauvegarde et restauration</h2>
+    <div style="font-size:12.5px;color:var(--ink-dim);margin-bottom:8px;line-height:1.4">
+      Sauvegarde ou restaure l'ensemble des données de l'application (équipes, adhérents, entraînements, présences) dans un seul fichier .zip.
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn" style="margin-top:0;flex:1;min-width:140px" onclick="backupData()">⬇ Sauvegarde</button>
+      <button class="btn btn-ghost" style="margin-top:0;flex:1;min-width:140px" onclick="document.getElementById('restoreInput').click()">⬆ Restauration</button>
+      <input id="restoreInput" type="file" accept=".zip,application/zip" style="display:none" onchange="restoreData(this)">
+    </div>
+  </div>
+  <div class="card">
+    <h2>Mot de passe d'accès</h2>
+    <div style="font-size:12.5px;color:var(--ink-dim);margin-bottom:8px;line-height:1.4">
+      Protection légère côté navigateur (pas un vrai contrôle d'accès). Pour changer le mot de passe partagé : saisis le nouveau mot de passe ci-dessous, copie le hash généré, puis remplace la valeur de <code>PASSWORD_HASH</code> tout en haut du fichier HTML (dans le &lt;script&gt;) par ce hash. Sauvegarde et redéploie le fichier.
+    </div>
+    <label for="hashToolInput">Nouveau mot de passe</label>
+    <input id="hashToolInput" type="text" placeholder="Ex. ClubDammarie2027!">
+    <button class="btn" onclick="generatePasswordHash()">Générer le hash</button>
+    <div id="hashToolResult" style="margin-top:10px"></div>
+  </div>
+  `;
+}
+async function generatePasswordHash(){
+  const val = document.getElementById('hashToolInput').value;
+  const resultEl = document.getElementById('hashToolResult');
+  if(!val){ resultEl.innerHTML = '<span style="color:var(--absent);font-size:12.5px">Saisissez un mot de passe.</span>'; return; }
+  const hash = await sha256Hex(val);
+  resultEl.innerHTML = `
+    <label style="font-size:11.5px">Hash à coller dans PASSWORD_HASH</label>
+    <input type="text" readonly value="${hash}" onclick="this.select()" style="font-size:11.5px;font-family:monospace">
+  `;
 }
 
 // ---------- ADHERENTS ----------
@@ -475,17 +585,17 @@ function viewAdherents(){
     <label for="memberName">Nom</label>
     <input id="memberName" type="text" placeholder="Nom et prénom">
     <div class="radio-row">
-      <label class="${newMemberType==='joueur'?'checked':''}" onclick="setMemberType('joueur')">
-        <input type="radio" name="mtype" ${newMemberType==='joueur'?'checked':''} style="width:auto"> Joueur
+      <label id="mtypeJoueurLabel" class="${newMemberType==='joueur'?'checked':''}" onclick="setMemberType('joueur')">
+        <input id="mtypeJoueurRadio" type="radio" name="mtype" ${newMemberType==='joueur'?'checked':''} style="width:auto"> Joueur
       </label>
-      <label class="${newMemberType==='entraineur'?'checked':''}" onclick="setMemberType('entraineur')">
-        <input type="radio" name="mtype" ${newMemberType==='entraineur'?'checked':''} style="width:auto"> Entraîneur
+      <label id="mtypeEntraineurLabel" class="${newMemberType==='entraineur'?'checked':''}" onclick="setMemberType('entraineur')">
+        <input id="mtypeEntraineurRadio" type="radio" name="mtype" ${newMemberType==='entraineur'?'checked':''} style="width:auto"> Entraîneur
       </label>
     </div>
     <label for="memberTeam">Équipe</label>
     <select id="memberTeam">
-      <option value="" disabled ${roster.teams.length?'selected':''}>${roster.teams.length ? 'Choisir une équipe' : 'Créez d\'abord une équipe'}</option>
-      ${teamOptions}
+      <option value="" disabled ${roster.teams.length?'':'selected'}>${roster.teams.length ? 'Choisir une équipe' : 'Créez d\'abord une équipe'}</option>
+      ${roster.teams.map(t=>`<option value="${escapeHtml(t)}" ${t===lastMemberTeam?'selected':''}>${escapeHtml(t)}</option>`).join('')}
     </select>
     <button class="btn" onclick="addMember()">Ajouter l'adhérent</button>
   </div>
@@ -505,7 +615,19 @@ function memberRow(m){
   const typeLabel = m.type==='entraineur' ? 'Entraîneur' : 'Joueur';
   return `<div class="row"><span>${escapeHtml(m.name)} <span class="tag">${typeLabel}</span></span><span style="display:flex;gap:4px;flex-shrink:0"><button class="del" style="color:var(--gold)" onclick="openEditMember('${m.id}')">Modifier</button><button class="del" onclick="deleteMember('${m.id}')">Supprimer</button></span></div>`;
 }
-function setMemberType(t){ newMemberType = t; renderMain(); }
+function setMemberType(t){
+  newMemberType = t;
+  const joueurLabel = document.getElementById('mtypeJoueurLabel');
+  const entraineurLabel = document.getElementById('mtypeEntraineurLabel');
+  const joueurRadio = document.getElementById('mtypeJoueurRadio');
+  const entraineurRadio = document.getElementById('mtypeEntraineurRadio');
+  if(joueurLabel){
+    joueurLabel.classList.toggle('checked', t==='joueur');
+    entraineurLabel.classList.toggle('checked', t==='entraineur');
+    joueurRadio.checked = t==='joueur';
+    entraineurRadio.checked = t==='entraineur';
+  }
+}
 
 async function addTeam(){
   const input = document.getElementById('newTeam');
@@ -530,6 +652,7 @@ async function addMember(){
   const sel = document.getElementById('memberTeam');
   if(!sel || !sel.value){ await showAlert(roster.teams.length ? 'Choisissez une équipe.' : 'Créez d\'abord une équipe.'); return; }
   const team = sel.value;
+  lastMemberTeam = team;
   roster.members.push({ id: uid(), name, type: newMemberType, team });
   await setJSON('club:roster', roster);
   renderMain();
@@ -555,11 +678,11 @@ function openEditMember(id){
         <label for="editName">Nom</label>
         <input id="editName" type="text" value="${escapeHtml(m.name)}">
         <div class="radio-row">
-          <label class="${editType==='joueur'?'checked':''}" onclick="setEditType('joueur')">
-            <input type="radio" name="etype" ${editType==='joueur'?'checked':''} style="width:auto"> Joueur
+          <label id="etypeJoueurLabel" class="${editType==='joueur'?'checked':''}" onclick="setEditType('joueur')">
+            <input id="etypeJoueurRadio" type="radio" name="etype" ${editType==='joueur'?'checked':''} style="width:auto"> Joueur
           </label>
-          <label class="${editType==='entraineur'?'checked':''}" onclick="setEditType('entraineur')">
-            <input type="radio" name="etype" ${editType==='entraineur'?'checked':''} style="width:auto"> Entraîneur
+          <label id="etypeEntraineurLabel" class="${editType==='entraineur'?'checked':''}" onclick="setEditType('entraineur')">
+            <input id="etypeEntraineurRadio" type="radio" name="etype" ${editType==='entraineur'?'checked':''} style="width:auto"> Entraîneur
           </label>
         </div>
         <label for="editTeam">Équipe (optionnel)</label>
@@ -578,7 +701,13 @@ function openEditMember(id){
     root.querySelector('.modal-overlay').onclick = (e)=>{ if(e.target===root.querySelector('.modal-overlay')) root.innerHTML=''; };
   }
 
-  window.setEditType = (t)=>{ editType = t; renderModal(); };
+  window.setEditType = (t)=>{
+    editType = t;
+    document.getElementById('etypeJoueurLabel').classList.toggle('checked', t==='joueur');
+    document.getElementById('etypeEntraineurLabel').classList.toggle('checked', t==='entraineur');
+    document.getElementById('etypeJoueurRadio').checked = t==='joueur';
+    document.getElementById('etypeEntraineurRadio').checked = t==='entraineur';
+  };
   renderModal();
 }
 
@@ -1470,7 +1599,44 @@ async function setAttendance(trainingId, memberId, value){
 function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function escapeAttr(s){ return String(s).replace(/'/g, "\\'"); }
 
-loadAll();
+// ---------- VERROU D'ACCES ----------
+async function sha256Hex(text){
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+function logout(){
+  sessionStorage.removeItem('kali-unlocked');
+  location.reload();
+}
+async function tryUnlock(){
+  const input = document.getElementById('lockPassword');
+  const errorEl = document.getElementById('lockError');
+  const value = input.value;
+  if(!value){ errorEl.textContent = 'Merci de saisir le mot de passe.'; return; }
+  let hash;
+  try{
+    hash = await sha256Hex(value);
+  }catch(e){
+    errorEl.textContent = "Cette fonctionnalité nécessite une connexion sécurisée (https) ou un test en local.";
+    return;
+  }
+  if(hash === PASSWORD_HASH){
+    sessionStorage.setItem('kali-unlocked', 'true');
+    document.getElementById('lockScreen').style.display = 'none';
+    loadAll();
+  }else{
+    errorEl.textContent = 'Mot de passe incorrect.';
+    input.value = '';
+    input.focus();
+  }
+}
+document.getElementById('lockPassword').addEventListener('keydown', e=>{ if(e.key==='Enter') tryUnlock(); });
+
+if(sessionStorage.getItem('kali-unlocked') === 'true'){
+  document.getElementById('lockScreen').style.display = 'none';
+  loadAll();
+}
+
 </script>
 </body>
 </html>
