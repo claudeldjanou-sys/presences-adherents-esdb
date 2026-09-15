@@ -215,6 +215,29 @@
     cursor:pointer;
     padding:4px 8px;
   }
+  .team-filter{
+    margin-top:10px;
+    border-bottom:1px solid var(--line);
+  }
+  .team-check{
+    display:flex;
+    align-items:center;
+    gap:9px;
+    margin:0;
+    padding:9px 2px;
+    cursor:pointer;
+    text-transform:none;
+    letter-spacing:0;
+    color:var(--ink);
+    font-size:13px;
+  }
+  .team-check input[type=checkbox]{
+    width:17px;
+    height:17px;
+    accent-color:var(--gold);
+    cursor:pointer;
+    flex-shrink:0;
+  }
   .group-title{
     font-size:11px;
     text-transform:uppercase;
@@ -415,6 +438,7 @@ let selectedTraining = null;
 let newMemberType = 'joueur';
 let lastMemberTeam = null;
 let loaded = false;
+let visibleTeams = {}; // Toutes les équipes sont masquées par défaut
 
 const STORAGE_PREFIX = 'kali-club:';
 async function getJSON(key, fallback){
@@ -514,6 +538,17 @@ function setTab(id){ currentTab = id; renderNav(); renderMain(); }
 function membersOf(teamName){
   return roster.members.filter(m => m.team===teamName).sort((a,b)=>a.name.localeCompare(b.name, 'fr', {sensitivity:'base'}));
 }
+function toggleTeamVisibility(teamName, visible){
+  visibleTeams[teamName] = visible;
+  renderMain();
+}
+function toggleAllMembersVisibility(){
+  const allVisible = roster.teams.every(t => visibleTeams[t] === true) && visibleTeams['__unassigned__'] === true;
+  const visible = !allVisible;
+  roster.teams.forEach(t => { visibleTeams[t] = visible; });
+  visibleTeams['__unassigned__'] = visible;
+  renderMain();
+}
 function unassigned(){
   return roster.members.filter(m => !m.team).sort((a,b)=>a.name.localeCompare(b.name, 'fr', {sensitivity:'base'}));
 }
@@ -580,13 +615,18 @@ function viewAdherents(){
     membersHtml = '<div class="empty">Aucun adhérent enregistré.</div>';
   }else{
     roster.teams.forEach(t=>{
+      const checked = visibleTeams[t] === true;
       const ms = membersOf(t);
-      membersHtml += `<div class="group-title">${escapeHtml(t)}</div>`;
-      membersHtml += ms.length ? ms.map(m=>memberRow(m)).join('') : '<div class="empty">Aucun adhérent dans cette équipe.</div>';
+      membersHtml += `<div class="team-filter"><label class="team-check"><input type="checkbox" ${checked?'checked':''} onchange="toggleTeamVisibility('${escapeAttr(t)}', this.checked)"><span>${escapeHtml(t)}</span></label></div>`;
+      if(checked){
+        membersHtml += ms.length ? ms.map(m=>memberRow(m)).join('') : '<div class="empty">Aucun adhérent dans cette équipe.</div>';
+      }
     });
     const np = unassigned();
-    membersHtml += `<div class="group-title">Sans équipe</div>`;
-    membersHtml += np.length ? np.map(m=>memberRow(m)).join('') : '<div class="empty">Aucun adhérent sans équipe.</div>';
+    membersHtml += `<div class="team-filter"><label class="team-check"><input type="checkbox" ${visibleTeams['__unassigned__'] === true?'checked':''} onchange="toggleTeamVisibility('__unassigned__', this.checked)"><span>Sans équipe</span></label></div>`;
+    if(visibleTeams['__unassigned__'] === true){
+      membersHtml += np.length ? np.map(m=>memberRow(m)).join('') : '<div class="empty">Aucun adhérent sans équipe.</div>';
+    }
   }
 
   return `
@@ -599,7 +639,12 @@ function viewAdherents(){
   </div>
 
   <div class="card">
-    <h2>Liste des adhérents</h2>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <h2 style="margin:0">Liste des adhérents</h2>
+      <div style="display:flex;gap:6px">
+        <button id="toggleAllMembersBtn" class="btn btn-ghost" style="margin:0;padding:6px 10px;font-size:12px" onclick="toggleAllMembersVisibility()">${roster.teams.every(t => visibleTeams[t] === true) && visibleTeams['__unassigned__'] === true ? 'Masquer tous' : 'Afficher tous'}</button>
+      </div>
+    </div>
     ${membersHtml}
   </div>
 
