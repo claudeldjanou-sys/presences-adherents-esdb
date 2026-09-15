@@ -469,6 +469,29 @@ function showAlert(message){
     root.querySelector('.modal-overlay').onclick = (e)=>{ if(e.target.classList.contains('modal-overlay')) close(); };
   });
 }
+function showPrompt(message, defaultValue){
+  return new Promise(resolve=>{
+    const root = document.getElementById('modalRoot');
+    root.innerHTML = `<div class="modal-overlay">
+      <div class="modal-box">
+        <p>${escapeHtml(message)}</p>
+        <input id="promptInput" type="text" value="${escapeAttr(defaultValue||'')}">
+        <div class="modal-actions">
+          <button class="btn-cancel" id="promptCancel">Annuler</button>
+          <button class="btn-confirm" id="promptConfirm">Valider</button>
+        </div>
+      </div>
+    </div>`;
+    const inputEl = document.getElementById('promptInput');
+    inputEl.focus();
+    inputEl.select();
+    const close = (val)=>{ root.innerHTML=''; resolve(val); };
+    document.getElementById('promptCancel').onclick = ()=>close(null);
+    document.getElementById('promptConfirm').onclick = ()=>close(inputEl.value.trim());
+    inputEl.onkeydown = (e)=>{ if(e.key==='Enter') close(inputEl.value.trim()); if(e.key==='Escape') close(null); };
+    root.querySelector('.modal-overlay').onclick = (e)=>{ if(e.target.classList.contains('modal-overlay')) close(null); };
+  });
+}
 
 async function loadAll(){
   roster = await getJSON('club:roster', { teams: [], members: [] });
@@ -549,7 +572,7 @@ async function generatePasswordHash(){
 function viewAdherents(){
   const teamOptions = roster.teams.map(t=>`<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
   let teamsListHtml = roster.teams.length
-    ? roster.teams.map(t=>`<div class="row"><span>${escapeHtml(t)}</span><button class="del" onclick="deleteTeam('${escapeAttr(t)}')">Supprimer</button></div>`).join('')
+    ? roster.teams.map(t=>`<div class="row"><span>${escapeHtml(t)}</span><span style="display:flex;gap:6px"><button class="btn-ghost" style="padding:4px 10px;font-size:12px" onclick="renameTeam('${escapeAttr(t)}')">Modifier</button><button class="del" onclick="deleteTeam('${escapeAttr(t)}')">Supprimer</button></span></div>`).join('')
     : '<div class="empty">Aucune équipe pour l\'instant. Ajoutez-en une pour commencer.</div>';
 
   let membersHtml = '';
@@ -650,9 +673,22 @@ async function deleteTeam(name){
   await setJSON('club:roster', roster);
   renderMain();
 }
+async function renameTeam(oldName){
+  const newName = await showPrompt('Nouveau nom de l\'équipe :', oldName);
+  if(newName===null) return;
+  if(!newName){ await showAlert('Le nom de l\'équipe est obligatoire.'); return; }
+  if(newName===oldName) return;
+  if(roster.teams.includes(newName)){ await showAlert('Cette équipe existe déjà.'); return; }
+  roster.teams = roster.teams.map(t => t===oldName ? newName : t);
+  roster.members = roster.members.map(m => m.team===oldName ? {...m, team:newName} : m);
+  trainings = trainings.map(tr => tr.team===oldName ? {...tr, team:newName} : tr);
+  await setJSON('club:roster', roster);
+  await setJSON('club:trainings', trainings);
+  renderMain();
+}
 async function addMember(){
   const nameInput = document.getElementById('memberName');
-  const name = nameInput.value.trim();
+  const name = nameInput.value.trim().toUpperCase();
   const prenomInput = document.getElementById('memberPrenom');
   const prenom = prenomInput.value.trim();
   const telephone = document.getElementById('memberTelephone').value.trim();
@@ -726,7 +762,7 @@ function openEditMember(id){
 
 async function saveEditMember(id, type){
   const nameInput = document.getElementById('editName');
-  const name = nameInput.value.trim();
+  const name = nameInput.value.trim().toUpperCase();
   const prenom = document.getElementById('editPrenom').value.trim();
   const telephone = document.getElementById('editTelephone').value.trim();
   if(!name){ await showAlert('Le nom est obligatoire.'); return; }
@@ -799,7 +835,7 @@ async function importMembersCSV(){
   let imported = 0;
   for(let i=startIdx;i<rows.length;i++){
     const row = rows[i];
-    const name = (row[colName]||'').trim();
+    const name = (row[colName]||'').trim().toUpperCase();
     if(!name) continue;
     const prenom = colPrenom>=0 ? (row[colPrenom]||'').trim() : '';
     const telephone = colTelephone>=0 ? (row[colTelephone]||'').trim() : '';
@@ -875,7 +911,7 @@ async function importAttendanceCSV(){
     if(row.length===0 || row.every(c=>!c)) continue;
     const date = parseFlexibleDate(row[colDate]);
     const team = (row[colTeam]||'').trim();
-    const name = (row[colName]||'').trim();
+    const name = (row[colName]||'').trim().toUpperCase();
     const present = parsePresentValue(row[colPresent]);
     if(!date || !team || !name){ skipped++; continue; }
 
@@ -1101,7 +1137,7 @@ function viewStats(){
   const memberRows = ms.length ? ms.map(m=>`
     <div class="attend-row">
       <div class="avatar">${initials(m.name)}</div>
-      <div class="attend-name" style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px" onclick="openMemberHistory('${m.id}')">${escapeHtml(m.name)}${m.team?` <span class="tag">${escapeHtml(m.team)}</span>`:''}</div>
+      <div class="attend-name" style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px" onclick="openMemberHistory('${m.id}')">${escapeHtml(m.name)}${m.prenom?` ${escapeHtml(m.prenom)}`:''}${m.team?` <span class="tag">${escapeHtml(m.team)}</span>`:''}</div>
       <div style="width:130px;display:flex;align-items:center;gap:8px">
         <div style="flex:1;height:7px;background:var(--surface-2);border-radius:4px;overflow:hidden">
           <div style="width:${m.pct??0}%;height:100%;background:${barColor(m.pct)}"></div>
@@ -1333,7 +1369,7 @@ async function generateReportInner(){
       else if(st===false) absences++;
     });
     const total = presences+absences;
-    return { name: p.name, presences, absences, pct: total ? presences/total*100 : null };
+    return { name: p.name, prenom: p.prenom, presences, absences, pct: total ? presences/total*100 : null };
   }).sort((a,b)=>{
     if(a.pct===null && b.pct===null) return a.name.localeCompare(b.name);
     if(a.pct===null) return 1;
@@ -1418,7 +1454,7 @@ async function generateReportInner(){
   doc.autoTable({
     startY: y+4,
     head: [['Joueur','Présences','Absences','Taux présence']],
-    body: playerStats.map(p=>[p.name, p.presences, p.absences, p.pct===null?'—':fmtPct(p.pct)+' %']),
+    body: playerStats.map(p=>[p.prenom?`${p.name} ${p.prenom}`:p.name, p.presences, p.absences, p.pct===null?'—':fmtPct(p.pct)+' %']),
     theme:'grid',
     headStyles:{ fillColor: goldRGB, textColor: inkRGB, fontStyle:'bold' },
     styles:{ fontSize:10 },
@@ -1454,7 +1490,7 @@ async function generateReportInner(){
   doc.autoTable({
     startY: 29,
     head: [['Adhérent', ...relevant.map(tr=>formatDateSlash(tr.date))]],
-    body: matrixPlayers.map(p=>[p.name, ...relevant.map(()=>'')]),
+    body: matrixPlayers.map(p=>[p.prenom?`${p.name} ${p.prenom}`:p.name, ...relevant.map(()=>'')]),
     theme:'grid',
     styles:{ fontSize:8, cellPadding:1.5, halign:'center', valign:'middle', minCellHeight:8 },
     headStyles:{ fillColor: goldRGB, textColor: inkRGB, fontStyle:'bold', fontSize:8, halign:'center' },
