@@ -121,6 +121,93 @@
     margin:0 0 12px;
     color:var(--gold);
   }
+  .presence-calendar{
+    border:1px solid var(--line);
+    border-radius:10px;
+    overflow:hidden;
+    background:var(--surface-2);
+  }
+  .calendar-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:8px;
+    padding:10px 12px;
+    border-bottom:1px solid var(--line);
+  }
+  .calendar-title{
+    font-weight:700;
+    text-transform:capitalize;
+    color:var(--ink);
+  }
+  .calendar-nav{
+    display:flex;
+    gap:6px;
+  }
+  .calendar-nav button{
+    width:32px;
+    height:30px;
+    padding:0;
+    margin:0;
+  }
+  .calendar-weekdays,.calendar-grid{
+    display:grid;
+    grid-template-columns:repeat(7,1fr);
+  }
+  .calendar-weekdays{
+    border-bottom:1px solid var(--line);
+  }
+  .calendar-weekday{
+    padding:7px 2px;
+    text-align:center;
+    font-size:10px;
+    font-weight:700;
+    color:var(--ink-dim);
+    text-transform:uppercase;
+  }
+  .calendar-day{
+    min-height:68px;
+    padding:5px;
+    border-right:1px solid var(--line);
+    border-bottom:1px solid var(--line);
+    cursor:pointer;
+    background:var(--surface-2);
+  }
+  .calendar-day:nth-child(7n){ border-right:none; }
+  .calendar-day.empty-day{ cursor:default; opacity:.35; }
+  .calendar-day.has-training{ background:var(--surface); }
+  .calendar-day.selected-day{ outline:2px solid var(--gold); outline-offset:-2px; }
+  .calendar-day-number{
+    font-size:11px;
+    color:var(--ink-dim);
+    margin-bottom:4px;
+  }
+  .calendar-day.today .calendar-day-number{
+    color:var(--gold);
+    font-weight:800;
+  }
+  .calendar-training{
+    display:block;
+    width:100%;
+    margin-top:3px;
+    padding:4px 5px;
+    border-radius:5px;
+    background:var(--gold);
+    color:#1a1405;
+    font-size:9.5px;
+    line-height:1.15;
+    font-weight:700;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .calendar-more{
+    display:block;
+    margin-top:2px;
+    font-size:9px;
+    color:var(--ink-dim);
+  }
+
   label{
     display:block;
     font-size:12px;
@@ -335,6 +422,24 @@
     padding:60px 0;
     color:var(--ink-dim);
   }
+  .attend-name-editable{ cursor:pointer; user-select:none; -webkit-user-select:none; }
+  [data-longpress-type]{ -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
+  .modal-header{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin:0 0 4px; }
+  .modal-delete{
+    flex:0 0 auto;
+    max-width:100%;
+    padding:6px 10px;
+    border-radius:7px;
+    border:none;
+    background:var(--absent);
+    color:#fff;
+    font-size:12px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:0.3px;
+    cursor:pointer;
+    white-space:nowrap;
+  }
   .modal-overlay{
     position:fixed;
     inset:0;
@@ -396,6 +501,9 @@
     <div class="sub" style="margin-bottom:20px">Accès réservé aux personnes autorisées du club</div>
     <label for="lockPassword">Mot de passe</label>
     <input id="lockPassword" type="password" placeholder="••••••••" autocomplete="current-password">
+    <label for="lockRemember" style="display:flex;align-items:center;gap:8px;margin:10px 0 0;text-transform:none;letter-spacing:0;font-size:13px;color:var(--ink);cursor:pointer">
+      <input id="lockRemember" type="checkbox" style="width:17px;height:17px;accent-color:var(--gold);flex-shrink:0;cursor:pointer"> Se souvenir de moi sur cet appareil
+    </label>
     <div id="lockError" style="color:var(--absent);font-size:12.5px;min-height:16px;margin-top:6px"></div>
     <button class="btn" style="width:100%" onclick="tryUnlock()">Accéder à l'application</button>
   </div>
@@ -435,8 +543,11 @@ let trainings = [];
 let attendance = {};
 let currentTab = 'adherents';
 let selectedTraining = null;
+let presenceCalendarMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+let trainingCalendarMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 let newMemberType = 'joueur';
 let lastMemberTeam = null;
+let memberQuery = '';
 let loaded = false;
 let visibleTeams = {}; // Toutes les équipes sont masquées par défaut
 
@@ -528,7 +639,7 @@ async function loadAll(){
 
 function renderNav(){
   const nav = document.getElementById('nav');
-  const tabs = [['adherents','Adhérents'],['entrainements','Entraînements'],['presences','Présences'],['stats','Stats'],['administration','Administration']];
+  const tabs = [['adherents','Adhérents'],['presences','Présences'],['stats','Stats'],['administration','Administration']];
   nav.innerHTML = tabs.map(([id,label]) =>
     `<button class="${currentTab===id?'active':''}" onclick="setTab('${id}')">${label}</button>`
   ).join('');
@@ -556,12 +667,119 @@ function initials(name){
   return name.trim().split(/\s+/).map(p=>p[0]).slice(0,2).join('').toUpperCase();
 }
 
+// Gestion du double-clic compatible avec les navigateurs :
+// on s'appuie sur deux événements click rapprochés plutôt que sur l'attribut
+// inline ondblclick, ce qui évite les différences d'interprétation des
+// gestionnaires inline entre navigateurs.
+let lastTrainingClickId = null;
+let lastTrainingClickTime = 0;
+let lastTrainingClickTimer = null;
+
+function bindPresenceCalendarTrainingEvents(){
+  const nodes = document.querySelectorAll('.calendar-training[data-training-id]');
+  nodes.forEach(node => {
+    node.addEventListener('click', function(e){
+      e.preventDefault();
+      e.stopPropagation();
+
+      const id = this.getAttribute('data-training-id');
+      const now = Date.now();
+      const isDoubleClick = lastTrainingClickId === id && (now - lastTrainingClickTime) <= 500;
+
+      if(isDoubleClick){
+        if(lastTrainingClickTimer) clearTimeout(lastTrainingClickTimer);
+        lastTrainingClickTimer = null;
+        lastTrainingClickId = null;
+        lastTrainingClickTime = 0;
+        openEditTraining(id);
+        return;
+      }
+
+      lastTrainingClickId = id;
+      lastTrainingClickTime = now;
+      if(lastTrainingClickTimer) clearTimeout(lastTrainingClickTimer);
+      lastTrainingClickTimer = setTimeout(() => {
+        lastTrainingClickId = null;
+        lastTrainingClickTime = 0;
+        lastTrainingClickTimer = null;
+      }, 550);
+
+      selectTraining(id);
+    });
+  });
+}
+
+// Appui long (≈0,6 s) sur un adhérent ou un entraînement : ouvre la fenêtre d'édition
+// (qui contient aussi le bouton Supprimer). Écouteurs globaux : valables après chaque rendu.
+(function(){
+  const LONG_PRESS_MS = 600, MOVE_TOLERANCE = 10;
+  let timer = null, startX = 0, startY = 0, suppressClick = false;
+  function cancelPress(){ if(timer){ clearTimeout(timer); timer = null; } }
+
+  document.addEventListener('pointerdown', function(e){
+    if(e.pointerType === 'mouse' && e.button !== 0) return;
+    const el = e.target.closest && e.target.closest('[data-longpress-type]');
+    if(!el) return;
+    cancelPress();
+    startX = e.clientX; startY = e.clientY;
+    timer = setTimeout(function(){
+      timer = null;
+      suppressClick = true;
+      const id = el.getAttribute('data-longpress-id');
+      if(el.getAttribute('data-longpress-type') === 'member') openEditMember(id);
+      else openEditTraining(id);
+    }, LONG_PRESS_MS);
+  });
+  document.addEventListener('pointermove', function(e){
+    if(timer && Math.hypot(e.clientX - startX, e.clientY - startY) > MOVE_TOLERANCE) cancelPress();
+  });
+  ['pointerup','pointercancel','dragstart','scroll'].forEach(function(evt){
+    document.addEventListener(evt, function(){
+      cancelPress();
+      if(suppressClick) setTimeout(function(){ suppressClick = false; }, 400);
+    }, true);
+  });
+  // Le clic qui suit un appui long ne doit pas déclencher l'action normale (sélection, double-clic...)
+  document.addEventListener('click', function(e){
+    if(suppressClick){ suppressClick = false; e.stopPropagation(); e.preventDefault(); }
+  }, true);
+  // Empêche le menu contextuel du navigateur pendant un appui long
+  document.addEventListener('contextmenu', function(e){
+    if(e.target.closest && e.target.closest('[data-longpress-type]')) e.preventDefault();
+  });
+})();
+
+// Double-clic sur le nom d'un adhérent (onglet Présences) : ouvre la fenêtre d'édition.
+let lastMemberClickId = null;
+let lastMemberClickTime = 0;
+
+function bindPresenceMemberEvents(){
+  document.querySelectorAll('.attend-name-editable[data-member-id]').forEach(node => {
+    node.addEventListener('click', function(e){
+      const id = this.getAttribute('data-member-id');
+      const now = Date.now();
+      if(lastMemberClickId === id && (now - lastMemberClickTime) <= 500){
+        lastMemberClickId = null;
+        lastMemberClickTime = 0;
+        e.preventDefault();
+        openEditMember(id);
+        return;
+      }
+      lastMemberClickId = id;
+      lastMemberClickTime = now;
+    });
+  });
+}
+
 function renderMain(){
   const app = document.getElementById('app');
   if(!loaded){ app.innerHTML = '<div class="loading">Chargement…</div>'; return; }
   if(currentTab==='adherents') app.innerHTML = viewAdherents();
-  else if(currentTab==='entrainements') app.innerHTML = viewEntrainements();
-  else if(currentTab==='presences') app.innerHTML = viewPresences();
+    else if(currentTab==='presences') {
+    app.innerHTML = viewPresences();
+    bindPresenceCalendarTrainingEvents();
+    bindPresenceMemberEvents();
+  }
   else if(currentTab==='stats') app.innerHTML = viewStats();
   else app.innerHTML = viewAdministration();
 }
@@ -579,6 +797,27 @@ function viewAdministration(){
       <button class="btn btn-ghost" style="margin-top:0;flex:1;min-width:140px" onclick="document.getElementById('restoreInput').click()">⬆ Restauration</button>
       <input id="restoreInput" type="file" accept=".zip,application/zip" style="display:none" onchange="restoreData(this)">
     </div>
+  </div>
+  <div class="card">
+    <h2>Importer des adhérents (CSV)</h2>
+    <div style="font-size:12.5px;color:var(--ink-dim);margin-bottom:8px;line-height:1.4">
+      Colonnes attendues : <strong>Nom, Prénom, Téléphone, Type, Équipe</strong> (Prénom/Téléphone facultatifs à l'import, à compléter ensuite si besoin). Type = "joueur" ou "entraineur". Les équipes inconnues sont créées automatiquement. La 1ère ligne peut être un en-tête.
+    </div>
+    <input id="csvImportInput" type="file" accept=".csv,text/csv" style="width:100%;background:var(--surface-2);border:1px solid var(--line);color:var(--ink);padding:9px 10px;border-radius:7px;font-size:13px;font-family:'Inter',sans-serif;">
+    <button class="btn" onclick="importMembersCSV()">Importer le fichier</button>
+  </div>
+  <div class="card">
+    <h2>Importer des statistiques de présence (CSV)</h2>
+    <div style="font-size:12.5px;color:var(--ink-dim);margin-bottom:8px;line-height:1.4">
+      Colonnes attendues : <strong>Date, Équipe, Nom, Présent</strong> (une colonne "Type" est acceptée en plus, entre Nom et Présent). Dates au format JJ/MM/AAAA ou AAAA-MM-JJ. Présent = "Oui"/"Non" (ou Vrai/Faux, 1/0). Les séances, équipes et adhérents manquants sont créés automatiquement. La 1ère ligne peut être un en-tête.
+    </div>
+    <input id="attendanceImportInput" type="file" accept=".csv,text/csv" style="width:100%;background:var(--surface-2);border:1px solid var(--line);color:var(--ink);padding:9px 10px;border-radius:7px;font-size:13px;font-family:'Inter',sans-serif;">
+    <button class="btn" onclick="importAttendanceCSV()">Importer le fichier</button>
+  </div>
+  <div class="card">
+    <h2>Export</h2>
+    <button class="btn" onclick="exportMembers()">Exporter les adhérents (CSV)</button>
+    <button class="btn btn-ghost" onclick="exportAttendance()" style="margin-left:8px">Exporter les présences (CSV)</button>
   </div>
   <div class="card">
     <h2>Mot de passe d'accès</h2>
@@ -605,57 +844,76 @@ async function generatePasswordHash(){
 
 // ---------- ADHERENTS ----------
 function viewAdherents(){
-  const teamOptions = roster.teams.map(t=>`<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
-  let teamsListHtml = roster.teams.length
-    ? roster.teams.map(t=>`<div class="row"><span>${escapeHtml(t)}</span><span style="display:flex;gap:6px"><button class="btn-ghost" style="padding:4px 10px;font-size:12px" onclick="renameTeam('${escapeAttr(t)}')">Modifier</button><button class="del" onclick="deleteTeam('${escapeAttr(t)}')">Supprimer</button></span></div>`).join('')
-    : '<div class="empty">Aucune équipe pour l\'instant. Ajoutez-en une pour commencer.</div>';
+  const q = memberQuery.trim().toLowerCase();
+  const matches = m => !q || `${m.name} ${m.prenom||''} ${m.telephone||''}`.toLowerCase().includes(q);
+  const teamHeader = (key, label, count, open) => `<div style="margin-top:10px"><button class="btn" style="margin:0;padding:6px 10px;font-size:12px${q?';cursor:default':''}" ${q?'disabled':''} onclick="toggleTeamVisibility('${escapeAttr(key)}', ${!open})">${open?'▾':'▸'} ${escapeHtml(label)} (${count})</button></div>`;
 
   let membersHtml = '';
   if(roster.teams.length===0 && roster.members.length===0){
-    membersHtml = '<div class="empty">Aucun adhérent enregistré.</div>';
+    membersHtml = '<div class="empty">Aucun adhérent enregistré. Utilisez « + Adhérent » pour commencer.</div>';
   }else{
-    roster.teams.forEach(t=>{
-      const checked = visibleTeams[t] === true;
-      const ms = membersOf(t);
-      membersHtml += `<div class="team-filter"><label class="team-check"><input type="checkbox" ${checked?'checked':''} onchange="toggleTeamVisibility('${escapeAttr(t)}', this.checked)"><span>${escapeHtml(t)}</span></label></div>`;
-      if(checked){
-        membersHtml += ms.length ? ms.map(m=>memberRow(m)).join('') : '<div class="empty">Aucun adhérent dans cette équipe.</div>';
-      }
+    roster.teams.slice().sort((a,b)=>a.localeCompare(b,'fr',{sensitivity:'base'})).forEach(t=>{
+      const ms = membersOf(t).filter(matches);
+      if(q && !ms.length) return;
+      const open = q ? true : visibleTeams[t] === true;
+      membersHtml += teamHeader(t, t, ms.length, open);
+      if(open) membersHtml += ms.length ? ms.map(m=>memberRow(m)).join('') : '<div class="empty">Aucun adhérent dans cette équipe.</div>';
     });
-    const np = unassigned();
-    membersHtml += `<div class="team-filter"><label class="team-check"><input type="checkbox" ${visibleTeams['__unassigned__'] === true?'checked':''} onchange="toggleTeamVisibility('__unassigned__', this.checked)"><span>Sans équipe</span></label></div>`;
-    if(visibleTeams['__unassigned__'] === true){
-      membersHtml += np.length ? np.map(m=>memberRow(m)).join('') : '<div class="empty">Aucun adhérent sans équipe.</div>';
+    const np = unassigned().filter(matches);
+    if(!q || np.length){
+      const open = q ? true : visibleTeams['__unassigned__'] === true;
+      membersHtml += teamHeader('__unassigned__', 'Sans équipe', np.length, open);
+      if(open) membersHtml += np.length ? np.map(m=>memberRow(m)).join('') : '<div class="empty">Aucun adhérent sans équipe.</div>';
     }
+    if(q && !membersHtml) membersHtml = '<div class="empty">Aucun résultat.</div>';
   }
 
+  const bs = 'margin:0;padding:6px 10px;font-size:12px';
   return `
   <div class="card">
-    <h2>Équipes</h2>
-    ${teamsListHtml}
-    <label for="newTeam">Nouvelle équipe</label>
-    <input id="newTeam" type="text" placeholder="Ex. Seniors A">
-    <button class="btn" onclick="addTeam()">Ajouter l'équipe</button>
-  </div>
-
-  <div class="card">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
-      <h2 style="margin:0">Liste des adhérents</h2>
-      <div style="display:flex;gap:6px">
-        <button id="toggleAllMembersBtn" class="btn btn-ghost" style="margin:0;padding:6px 10px;font-size:12px" onclick="toggleAllMembersVisibility()">${roster.teams.every(t => visibleTeams[t] === true) && visibleTeams['__unassigned__'] === true ? 'Masquer tous' : 'Afficher tous'}</button>
+      <h2 style="margin:0">Adhérents <span class="tag">${roster.members.length}</span></h2>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn" style="${bs}" onclick="openAddMemberDialog()">+ Adhérent</button>
+        <button class="btn btn-ghost" style="${bs}" onclick="openTeamsDialog()">Équipes</button>
       </div>
+    </div>
+    <input id="memberSearch" type="search" placeholder="Rechercher un nom, prénom ou téléphone…" value="${escapeHtml(memberQuery)}" oninput="filterMembers(this.value)" style="margin-top:10px">
+    <div style="display:flex;justify-content:flex-end;margin-top:6px">
+      <button id="toggleAllMembersBtn" class="btn btn-ghost" style="margin:0;padding:6px 10px;font-size:12px" onclick="toggleAllMembersVisibility()">${roster.teams.every(t => visibleTeams[t] === true) && visibleTeams['__unassigned__'] === true ? 'Masquer tous' : 'Afficher tous'}</button>
     </div>
     ${membersHtml}
   </div>
+  <div class="note">Données enregistrées dans ce navigateur, sur cet appareil.</div>
+  `;
+}
 
-  <div class="card">
-    <h2>Ajouter un adhérent</h2>
+// ---------- Fenêtres contextuelles de l'onglet Adhérents ----------
+const DLG_TITLE = "font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:0.5px;margin:0 0 4px;color:var(--gold)";
+function showDialog(html){
+  const root = document.getElementById('modalRoot');
+  root.innerHTML = `<div class="modal-overlay"><div class="modal-box" style="max-height:88vh;overflow-y:auto">${html}</div></div>`;
+  root.querySelector('.modal-overlay').onclick = e=>{ if(e.target.classList.contains('modal-overlay')) closeDialog(); };
+}
+function closeDialog(){ document.getElementById('modalRoot').innerHTML = ''; }
+
+function filterMembers(v){
+  memberQuery = v;
+  renderMain();
+  const i = document.getElementById('memberSearch');
+  if(i){ i.focus(); i.setSelectionRange(v.length, v.length); }
+}
+
+function openAddMemberDialog(v){
+  v = v || {};
+  showDialog(`
+    <h2 style="${DLG_TITLE}">Ajouter un adhérent</h2>
     <label for="memberName">Nom</label>
-    <input id="memberName" type="text" placeholder="Nom">
+    <input id="memberName" type="text" placeholder="Nom" value="${escapeHtml(v.name||'')}">
     <label for="memberPrenom">Prénom</label>
-    <input id="memberPrenom" type="text" placeholder="Prénom">
+    <input id="memberPrenom" type="text" placeholder="Prénom" value="${escapeHtml(v.prenom||'')}">
     <label for="memberTelephone">Téléphone (optionnel)</label>
-    <input id="memberTelephone" type="tel" placeholder="06 12 34 56 78">
+    <input id="memberTelephone" type="tel" placeholder="06 12 34 56 78" value="${escapeHtml(v.tel||'')}">
     <div class="radio-row">
       <label id="mtypeJoueurLabel" class="${newMemberType==='joueur'?'checked':''}" onclick="setMemberType('joueur')">
         <input id="mtypeJoueurRadio" type="radio" name="mtype" ${newMemberType==='joueur'?'checked':''} style="width:auto"> Joueur
@@ -666,27 +924,48 @@ function viewAdherents(){
     </div>
     <label for="memberTeam">Équipe</label>
     <select id="memberTeam">
-      <option value="" disabled ${roster.teams.length?'':'selected'}>${roster.teams.length ? 'Choisir une équipe' : 'Créez d\'abord une équipe'}</option>
-      ${roster.teams.map(t=>`<option value="${escapeHtml(t)}" ${t===lastMemberTeam?'selected':''}>${escapeHtml(t)}</option>`).join('')}
+      <option value="" disabled ${(v.team||lastMemberTeam)&&roster.teams.length?'':'selected'}>${roster.teams.length ? 'Choisir une équipe' : 'Créez d\'abord une équipe'}</option>
+      ${roster.teams.map(t=>`<option value="${escapeHtml(t)}" ${t===(v.team||lastMemberTeam)?'selected':''}>${escapeHtml(t)}</option>`).join('')}
     </select>
-    <button class="btn" onclick="addMember()">Ajouter l'adhérent</button>
-  </div>
-
-  <div class="card">
-    <h2>Importer des adhérents (CSV)</h2>
-    <div style="font-size:12.5px;color:var(--ink-dim);margin-bottom:8px;line-height:1.4">
-      Colonnes attendues : <strong>Nom, Prénom, Téléphone, Type, Équipe</strong> (Prénom/Téléphone facultatifs à l'import, à compléter ensuite si besoin). Type = "joueur" ou "entraineur". Les équipes inconnues sont créées automatiquement. La 1ère ligne peut être un en-tête.
-    </div>
-    <input id="csvImportInput" type="file" accept=".csv,text/csv" style="width:100%;background:var(--surface-2);border:1px solid var(--line);color:var(--ink);padding:9px 10px;border-radius:7px;font-size:13px;font-family:'Inter',sans-serif;">
-    <button class="btn" onclick="importMembersCSV()">Importer le fichier</button>
-  </div>
-  <div class="note">Données enregistrées dans ce navigateur, sur cet appareil.</div>
-  `;
+    <div class="modal-actions" style="margin-top:16px">
+      <button class="btn-cancel" onclick="closeDialog()">Annuler</button>
+      <button class="btn-ok" onclick="submitAddMember()">Ajouter</button>
+    </div>`);
 }
+async function submitAddMember(){
+  const g = id => document.getElementById(id).value;
+  const v = { name:g('memberName'), prenom:g('memberPrenom'), tel:g('memberTelephone'), team:g('memberTeam') };
+  const n = roster.members.length;
+  await addMember();
+  // Saisie refusée (champ manquant) : on rouvre la fenêtre avec les valeurs déjà saisies
+  if(roster.members.length===n) openAddMemberDialog(v); else closeDialog();
+}
+
+function openTeamsDialog(){
+  const rows = roster.teams.length
+    ? roster.teams.slice().sort((a,b)=>a.localeCompare(b,'fr',{sensitivity:'base'})).map(t=>`<div class="row"><span>${escapeHtml(t)} <span class="tag">${membersOf(t).length}</span></span><span style="display:flex;gap:6px"><button class="btn-ghost" style="padding:4px 10px;font-size:12px" onclick="teamAction('rename','${escapeAttr(t)}')">Modifier</button><button class="del" onclick="teamAction('delete','${escapeAttr(t)}')">Supprimer</button></span></div>`).join('')
+    : '<div class="empty">Aucune équipe pour l\'instant.</div>';
+  showDialog(`
+    <h2 style="${DLG_TITLE}">Équipes</h2>
+    ${rows}
+    <label for="newTeam">Nouvelle équipe</label>
+    <input id="newTeam" type="text" placeholder="Ex. Seniors A">
+    <div class="modal-actions" style="margin-top:16px">
+      <button class="btn-cancel" onclick="closeDialog()">Fermer</button>
+      <button class="btn-ok" onclick="teamAction('add')">Ajouter</button>
+    </div>`);
+}
+async function teamAction(kind, name){
+  if(kind==='add') await addTeam();
+  else if(kind==='rename') await renameTeam(name);
+  else await deleteTeam(name);
+  openTeamsDialog();
+}
+
 function memberRow(m){
   const typeLabel = m.type==='entraineur' ? 'Entraîneur' : 'Joueur';
-  const subLine = [m.prenom, m.telephone].filter(Boolean).join(' · ');
-  return `<div class="row"><span><div>${escapeHtml(m.name)} <span class="tag">${typeLabel}</span></div>${subLine?`<div style="font-size:11.5px;color:var(--ink-dim);margin-top:2px">${escapeHtml(subLine)}</div>`:''}</span><span style="display:flex;gap:4px;flex-shrink:0"><button class="del" style="color:var(--gold)" onclick="openEditMember('${m.id}')">Modifier</button><button class="del" onclick="deleteMember('${m.id}')">Supprimer</button></span></div>`;
+  const fullName = [m.name, m.prenom].filter(Boolean).join(' ');
+  return `<div class="row"><span data-longpress-type="member" data-longpress-id="${m.id}"><div>${escapeHtml(fullName)} <span class="tag">${typeLabel}</span></div>${m.telephone?`<div style="font-size:11.5px;color:var(--ink-dim);margin-top:2px">${escapeHtml(m.telephone)}</div>`:''}</span><span style="display:flex;gap:4px;flex-shrink:0"><button class="del" style="color:var(--gold)" onclick="openEditMember('${m.id}')">Modifier</button></span></div>`;
 }
 function setMemberType(t){
   newMemberType = t;
@@ -731,6 +1010,15 @@ async function renameTeam(oldName){
   await setJSON('club:trainings', trainings);
   renderMain();
 }
+// Clé d'unicité nom + prénom + équipe (sans tenir compte de la casse, des accents ni des espaces multiples)
+function memberKey(name, prenom, team){
+  const n = v => (v||'').toString().trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\s+/g,' ');
+  return `${n(name)}|${n(prenom)}|${n(team)}`;
+}
+function isDuplicateMember(name, prenom, team, ignoreId){
+  const key = memberKey(name, prenom, team);
+  return roster.members.some(m => m.id!==ignoreId && memberKey(m.name, m.prenom, m.team)===key);
+}
 async function addMember(){
   const nameInput = document.getElementById('memberName');
   const name = nameInput.value.trim().toUpperCase();
@@ -742,16 +1030,18 @@ async function addMember(){
   const sel = document.getElementById('memberTeam');
   if(!sel || !sel.value){ await showAlert(roster.teams.length ? 'Choisissez une équipe.' : 'Créez d\'abord une équipe.'); return; }
   const team = sel.value;
+  if(isDuplicateMember(name, prenom, team)){ await showAlert(`${name} ${prenom} existe déjà dans l'équipe ${team}.`); return; }
   lastMemberTeam = team;
   roster.members.push({ id: uid(), name, prenom, telephone: telephone||null, type: newMemberType, team });
   await setJSON('club:roster', roster);
   renderMain();
 }
 async function deleteMember(id){
-  if(!await showConfirm('Supprimer cet adhérent ?')) return;
+  if(!await showConfirm('Supprimer cet adhérent ?')) return false;
   roster.members = roster.members.filter(m=>m.id!==id);
   await setJSON('club:roster', roster);
   renderMain();
+  return true;
 }
 
 function openEditMember(id){
@@ -764,7 +1054,7 @@ function openEditMember(id){
     const teamOptions = roster.teams.map(t=>`<option value="${escapeHtml(t)}" ${t===m.team?'selected':''}>${escapeHtml(t)}</option>`).join('');
     root.innerHTML = `<div class="modal-overlay" id="editOverlay">
       <div class="modal-box">
-        <h2 style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:0.5px;margin:0 0 4px;color:var(--gold)">Modifier l'adhérent</h2>
+        <div class="modal-header"><h2 style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:0.5px;margin:0;color:var(--gold);min-width:0">Modifier l'adhérent</h2><button type="button" class="modal-delete" id="editDelete">Supprimer</button></div>
         <label for="editName">Nom</label>
         <input id="editName" type="text" value="${escapeHtml(m.name)}">
         <label for="editPrenom">Prénom</label>
@@ -792,6 +1082,10 @@ function openEditMember(id){
     </div>`;
     document.getElementById('editCancel').onclick = ()=>{ root.innerHTML=''; };
     document.getElementById('editSave').onclick = ()=> saveEditMember(id, editType);
+    document.getElementById('editDelete').onclick = async ()=>{
+      const done = await deleteMember(id);
+      if(!done) openEditMember(id);
+    };
     root.querySelector('.modal-overlay').onclick = (e)=>{ if(e.target===root.querySelector('.modal-overlay')) root.innerHTML=''; };
   }
 
@@ -816,6 +1110,7 @@ async function saveEditMember(id, type){
   const team = sel && sel.value ? sel.value : null;
   const idx = roster.members.findIndex(m=>m.id===id);
   if(idx===-1) return;
+  if(isDuplicateMember(name, prenom, team, id)){ await showAlert(`${name} ${prenom} existe déjà${team?` dans l'équipe ${team}`:' sans équipe'}.`); return; }
   roster.members[idx] = { ...roster.members[idx], name, prenom, telephone: telephone||null, type, team };
   await setJSON('club:roster', roster);
   document.getElementById('modalRoot').innerHTML = '';
@@ -877,7 +1172,7 @@ async function importMembersCSV(){
     colName=0; colPrenom=1; colTelephone=2; colType=3; colTeam=4;
   }
 
-  let imported = 0;
+  let imported = 0, skipped = 0;
   for(let i=startIdx;i<rows.length;i++){
     const row = rows[i];
     const name = (row[colName]||'').trim().toUpperCase();
@@ -887,18 +1182,18 @@ async function importMembersCSV(){
     const typeRaw = (row[colType]||'joueur').trim().toLowerCase();
     const type = (typeRaw.startsWith('entra') || typeRaw==='coach') ? 'entraineur' : 'joueur';
     const teamNameRaw = (row[colTeam]||'').trim();
-    let team = null;
-    if(teamNameRaw){
-      if(!roster.teams.includes(teamNameRaw)) roster.teams.push(teamNameRaw);
-      team = teamNameRaw;
-    }
+    const team = teamNameRaw || null;
+    // Doublon nom + prénom + équipe (déjà présent ou répété dans le fichier) : ligne ignorée
+    if(isDuplicateMember(name, prenom, team)){ skipped++; continue; }
+    if(team && !roster.teams.includes(team)) roster.teams.push(team);
     roster.members.push({ id: uid(), name, prenom, telephone: telephone||null, type, team });
     imported++;
   }
   await setJSON('club:roster', roster);
   input.value = '';
   renderMain();
-  await showAlert(imported > 0 ? `${imported} adhérent(s) importé(s). Pensez à compléter le prénom pour les adhérents dont il manquerait, via "Modifier".` : 'Aucun adhérent valide trouvé dans le fichier.');
+  const skipMsg = skipped > 0 ? ` ${skipped} doublon(s) nom-prénom-équipe ignoré(s).` : '';
+  await showAlert(imported > 0 ? `${imported} adhérent(s) importé(s).${skipMsg} Pensez à compléter le prénom pour les adhérents dont il manquerait, via "Modifier".` : (skipped > 0 ? `Aucun nouvel adhérent :${skipMsg}` : 'Aucun adhérent valide trouvé dans le fichier.'));
 }
 
 function normalizeHeader(h){
@@ -1006,29 +1301,59 @@ async function importAttendanceCSV(){
 // ---------- ENTRAINEMENTS ----------
 function viewEntrainements(){
   const teamOptions = roster.teams.map(t=>`<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
-  const sorted = [...trainings].sort((a,b)=> b.date.localeCompare(a.date));
-  let listHtml = sorted.length ? sorted.map(tr=>{
-    const concerned = concernedMembers(tr);
-    const att = attendance[tr.id] || {};
-    const present = concerned.filter(m=>att[m.id]===true).length;
-    return `<div class="training-card">
-      <div onclick="goToPresence('${tr.id}')" style="flex:1;cursor:pointer">
-        <div class="training-date">${formatDate(tr.date)}</div>
-        <div style="font-size:12px;color:var(--ink-dim)">${escapeHtml(tr.team)}${tr.label?' · '+escapeHtml(tr.label):''}</div>
-      </div>
-      <div class="score">${present}/${concerned.length}</div>
-      <span style="display:flex;gap:4px;flex-shrink:0;margin-left:8px">
-        <button class="del" style="color:var(--gold)" onclick="event.stopPropagation(); openEditTraining('${tr.id}')">Modifier</button>
-        <button class="del" onclick="event.stopPropagation(); deleteTraining('${tr.id}')">Supprimer</button>
-      </span>
-    </div>`;
-  }).join('') : '<div class="empty">Aucun entraînement enregistré.</div>';
 
-  return `
+  const year = trainingCalendarMonth.getFullYear();
+  const month = trainingCalendarMonth.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const mondayOffset = (firstDay.getDay() + 6) % 7;
+  const monthLabel = firstDay.toLocaleDateString('fr-FR', {month:'long', year:'numeric'});
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+
+  const byDate = {};
+  trainings.forEach(t=>{
+    if(!byDate[t.date]) byDate[t.date] = [];
+    byDate[t.date].push(t);
+  });
+
+  let cells = '';
+  for(let i=0;i<mondayOffset;i++) cells += `<div class="calendar-day empty-day"></div>`;
+  for(let day=1;day<=daysInMonth;day++){
+    const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    const dayTrainings = byDate[dateStr] || [];
+    const dayClass = ['calendar-day', dayTrainings.length?'has-training':'', dateStr===todayStr?'today':''].filter(Boolean).join(' ');
+    const trainingHtml = dayTrainings.slice(0,3).map(t=>{
+      const label = `${t.team}${t.label?' · '+t.label:''}`;
+      return `<span class="calendar-training" data-longpress-type="training" data-longpress-id="${t.id}" onclick="event.stopPropagation(); openEditTraining('${t.id}')">${escapeHtml(label)}</span>`;
+    }).join('');
+    const more = dayTrainings.length>3 ? `<span class="calendar-more">+${dayTrainings.length-3} autre${dayTrainings.length-3>1?'s':''}</span>` : '';
+    cells += `<div class="${dayClass}" onclick="selectTrainingDate('${dateStr}')">
+      <div class="calendar-day-number">${day}</div>${trainingHtml}${more}
+    </div>`;
+  }
+  const totalCells = mondayOffset + daysInMonth;
+  const trailing = (7 - (totalCells % 7)) % 7;
+  for(let i=0;i<trailing;i++) cells += `<div class="calendar-day empty-day"></div>`;
+
+  const calendar = `
   <div class="card">
-    <h2>Entraînements</h2>
-    ${listHtml}
-  </div>
+    <h2>Calendrier des entraînements</h2>
+    <div class="presence-calendar">
+      <div class="calendar-head">
+        <button class="btn btn-ghost calendar-nav" onclick="changeTrainingMonth(-1)" aria-label="Mois précédent">‹</button>
+        <div class="calendar-title">${escapeHtml(monthLabel)}</div>
+        <button class="btn btn-ghost calendar-nav" onclick="changeTrainingMonth(1)" aria-label="Mois suivant">›</button>
+      </div>
+      <div class="calendar-weekdays">
+        ${['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'].map(d=>`<div class="calendar-weekday">${d}</div>`).join('')}
+      </div>
+      <div class="calendar-grid">${cells}</div>
+    </div>
+    <div style="font-size:11.5px;color:var(--ink-dim);margin-top:8px">${trainings.length ? `${trainings.length} entraînement${trainings.length>1?'s':''} enregistré${trainings.length>1?'s':''}. Cliquez sur une séance pour la modifier ou accéder à sa feuille de présence.` : 'Aucun entraînement enregistré pour le moment. Cliquez sur un jour pour préparer un nouvel entraînement.'}</div>
+  </div>`;
+
+  return `${calendar}
   <div class="card">
     <h2>Nouvel entraînement</h2>
     <label for="trDate">Date</label>
@@ -1045,15 +1370,7 @@ function viewEntrainements(){
     <input id="trLabel" type="text" placeholder="Ex. Séance physique">
     <button class="btn" onclick="addTraining()">Créer l'entraînement</button>
   </div>
-  <div class="card">
-    <h2>Importer des statistiques de présence (CSV)</h2>
-    <div style="font-size:12.5px;color:var(--ink-dim);margin-bottom:8px;line-height:1.4">
-      Colonnes attendues : <strong>Date, Équipe, Nom, Présent</strong> (une colonne "Type" est acceptée en plus, entre Nom et Présent). Dates au format JJ/MM/AAAA ou AAAA-MM-JJ. Présent = "Oui"/"Non" (ou Vrai/Faux, 1/0). Les séances, équipes et adhérents manquants sont créés automatiquement. La 1ère ligne peut être un en-tête.
-    </div>
-    <input id="attendanceImportInput" type="file" accept=".csv,text/csv" style="width:100%;background:var(--surface-2);border:1px solid var(--line);color:var(--ink);padding:9px 10px;border-radius:7px;font-size:13px;font-family:'Inter',sans-serif;">
-    <button class="btn" onclick="importAttendanceCSV()">Importer le fichier</button>
-  </div>
-  `;
+`;
 }
 function concernedMembers(tr){
   if(tr.team==='Tous') return roster.members;
@@ -1078,13 +1395,14 @@ async function addTraining(){
   renderMain();
 }
 async function deleteTraining(id){
-  if(!await showConfirm('Supprimer cet entraînement ? Les présences enregistrées pour celui-ci seront perdues.')) return;
+  if(!await showConfirm('Supprimer cet entraînement ? Les présences enregistrées pour celui-ci seront perdues.')) return false;
   trainings = trainings.filter(t=>t.id!==id);
   delete attendance[id];
   await setJSON('club:trainings', trainings);
   await setJSON('club:attendance', attendance);
   if(selectedTraining===id) selectedTraining = null;
   renderMain();
+  return true;
 }
 function openEditTraining(id){
   const tr = trainings.find(t=>t.id===id);
@@ -1093,7 +1411,7 @@ function openEditTraining(id){
   const teamOptions = roster.teams.map(t=>`<option value="${escapeHtml(t)}" ${t===tr.team?'selected':''}>${escapeHtml(t)}</option>`).join('');
   root.innerHTML = `<div class="modal-overlay" id="trainingOverlay">
     <div class="modal-box">
-      <h2 style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:0.5px;margin:0 0 4px;color:var(--gold)">Modifier l'entraînement</h2>
+      <div class="modal-header"><h2 style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:0.5px;margin:0;color:var(--gold);min-width:0">Modifier l'entraînement</h2><button type="button" class="modal-delete" id="trainingDelete">Supprimer</button></div>
       <label for="editTrDate">Date</label>
       <input id="editTrDate" type="date" value="${escapeHtml(tr.date)}" onclick="openDatePicker(this)">
       <label for="editTrTeam">Équipe concernée</label>
@@ -1112,6 +1430,10 @@ function openEditTraining(id){
   const close = ()=>{ root.innerHTML=''; };
   document.getElementById('trainingCancel').onclick = close;
   document.getElementById('trainingSave').onclick = ()=> saveEditTraining(id);
+  document.getElementById('trainingDelete').onclick = async ()=>{
+    const done = await deleteTraining(id);
+    if(!done) openEditTraining(id);
+  };
   root.querySelector('.modal-overlay').onclick = (e)=>{ if(e.target===root.querySelector('.modal-overlay')) close(); };
 }
 async function saveEditTraining(id){
@@ -1193,29 +1515,16 @@ function viewStats(){
 
   return `
   <div class="card">
+    <h2>Rapport de présence (PDF)</h2>
+    <button class="btn" onclick="openReportDialog()">Générer le rapport PDF</button>
+  </div>
+  <div class="card">
     <h2>Présence par équipe</h2>
     ${teamRows}
   </div>
   <div class="card">
     <h2>Présence par adhérent</h2>
     ${memberRows}
-  </div>
-  <div class="card">
-    <h2>Rapport de présence (PDF)</h2>
-    <label for="reportTeam">Équipe</label>
-    <select id="reportTeam">
-      ${roster.teams.map(t=>`<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('') || '<option value="">Aucune équipe</option>'}
-    </select>
-    <label for="reportStart">Date de début (facultatif)</label>
-    <input id="reportStart" type="date" onclick="openDatePicker(this)">
-    <label for="reportEnd">Date de fin (facultatif)</label>
-    <input id="reportEnd" type="date" onclick="openDatePicker(this)">
-    <button class="btn" onclick="generateReport()">Générer le rapport PDF</button>
-  </div>
-  <div class="card">
-    <h2>Export</h2>
-    <button class="btn" onclick="exportMembers()">Exporter les adhérents (CSV)</button>
-    <button class="btn btn-ghost" onclick="exportAttendance()" style="margin-left:8px">Exporter les présences (CSV)</button>
   </div>
   `;
 }
@@ -1356,30 +1665,61 @@ function formatDateSlash(d){
 function fmtPct(n){
   return n.toFixed(1).replace('.', ',');
 }
-async function generateReport(){
+function openReportDialog(prefill){
+  prefill = prefill || {};
+  const root = document.getElementById('modalRoot');
+  const sortedTeams = roster.teams.slice().sort((a,b)=>a.localeCompare(b, 'fr', {sensitivity:'base'}));
+  const teamOptions = sortedTeams.length
+    ? sortedTeams.map((t,i)=>`<option value="${escapeHtml(t)}" ${(prefill.team ? t===prefill.team : i===0)?'selected':''}>${escapeHtml(t)}</option>`).join('') +
+      `<option value="${REPORT_ALL_TEAMS}" ${prefill.team===REPORT_ALL_TEAMS?'selected':''}>Toutes</option>`
+    : '<option value="">Aucune équipe</option>';
+  root.innerHTML = `<div class="modal-overlay" id="reportOverlay">
+    <div class="modal-box">
+      <h2 style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:0.5px;margin:0 0 4px;color:var(--gold)">Rapport de présence (PDF)</h2>
+      <label for="reportTeam">Équipe</label>
+      <select id="reportTeam">${teamOptions}</select>
+      <label for="reportStart">Date de début (facultatif)</label>
+      <input id="reportStart" type="date" value="${escapeHtml(prefill.start||'')}" onclick="openDatePicker(this)">
+      <label for="reportEnd">Date de fin (facultatif)</label>
+      <input id="reportEnd" type="date" value="${escapeHtml(prefill.end||'')}" onclick="openDatePicker(this)">
+      <div class="modal-actions" style="margin-top:16px">
+        <button class="btn-cancel" id="reportCancel">Annuler</button>
+        <button class="btn-ok" id="reportGenerate">Générer</button>
+      </div>
+    </div>
+  </div>`;
+  const close = ()=>{ root.innerHTML=''; };
+  document.getElementById('reportCancel').onclick = close;
+  document.getElementById('reportGenerate').onclick = ()=>{
+    const team = document.getElementById('reportTeam').value;
+    const start = document.getElementById('reportStart').value;
+    const end = document.getElementById('reportEnd').value;
+    close();
+    generateReport(team, start, end);
+  };
+  root.querySelector('.modal-overlay').onclick = (e)=>{ if(e.target===root.querySelector('.modal-overlay')) close(); };
+}
+async function generateReport(team, startVal, endVal){
   try{
-    await generateReportInner();
+    const ok = await generateReportInner(team, startVal, endVal);
+    // Paramètres refusés (aucune équipe, aucune séance...) : on rouvre la fenêtre pour les corriger
+    if(ok === false) openReportDialog({ team, start: startVal, end: endVal });
   }catch(e){
     console.error('Erreur génération PDF', e);
     await showAlert("La génération du PDF a échoué : " + (e && e.message ? e.message : e));
   }
 }
-async function generateReportInner(){
-  const teamSel = document.getElementById('reportTeam');
-  const team = teamSel ? teamSel.value : '';
-  if(!team){ await showAlert('Choisissez une équipe.'); return; }
-  const startVal = document.getElementById('reportStart').value;
-  const endVal = document.getElementById('reportEnd').value;
-
+const REPORT_ALL_TEAMS = '__all__';
+function computeTeamReport(team, startVal, endVal){
   let relevant = trainings.filter(tr => tr.team===team || tr.team==='Tous');
   if(startVal) relevant = relevant.filter(tr => tr.date >= startVal);
   if(endVal) relevant = relevant.filter(tr => tr.date <= endVal);
   relevant = relevant.slice().sort((a,b)=>a.date.localeCompare(b.date));
 
-  if(relevant.length===0){ await showAlert("Aucun entraînement trouvé pour cette équipe sur la période choisie."); return; }
+  if(relevant.length===0) return { error: 'no-training' };
 
   const players = membersOf(team).filter(m=>m.type==='joueur');
-  if(players.length===0){ await showAlert("Aucun joueur enregistré dans cette équipe."); return; }
+  if(players.length===0) return { error: 'no-player' };
 
   // Stats par séance
   const sessions = relevant.map(tr=>{
@@ -1387,15 +1727,17 @@ async function generateReportInner(){
     let present=0, absent=0;
     players.forEach(p=>{
       const st = att[p.id];
+      // Toute valeur autre que 1 (présence) est considérée comme une absence.
       if(st===true) present++;
-      else if(st===false) absent++;
+      else absent++;
     });
     const total = present+absent;
     return {
       date: tr.date,
       present, absent,
       pctPresent: total ? present/total*100 : null,
-      pctAbsent: total ? absent/total*100 : null
+      // Taux d'absence = 100 % - taux de présence.
+      pctAbsent: total ? 100 - (present/total*100) : null
     };
   });
 
@@ -1403,15 +1745,17 @@ async function generateReportInner(){
   const totalAbsent = sessions.reduce((s,x)=>s+x.absent,0);
   const totalMarked = totalPresent+totalAbsent;
   const avgPresent = totalMarked ? totalPresent/totalMarked*100 : null;
-  const avgAbsent = totalMarked ? totalAbsent/totalMarked*100 : null;
+  // Taux d'absences de la synthèse générale = 100 % - taux de présence.
+  const avgAbsent = avgPresent===null ? null : 100 - avgPresent;
 
   // Stats par joueur
   const playerStats = players.map(p=>{
     let presences=0, absences=0;
     relevant.forEach(tr=>{
       const st = (attendance[tr.id]||{})[p.id];
+      // Si la présence n'est pas à 1, l'adhérent est compté absent par défaut.
       if(st===true) presences++;
-      else if(st===false) absences++;
+      else absences++;
     });
     const total = presences+absences;
     return { name: p.name, prenom: p.prenom, presences, absences, pct: total ? presences/total*100 : null };
@@ -1451,9 +1795,11 @@ async function generateReportInner(){
     }
   }
 
-  if(!window.jspdf){ await showAlert("La librairie de génération PDF n'a pas pu être chargée (vérifiez votre connexion internet)."); return; }
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
+  return { team, relevant, players, sessions, totalPresent, totalAbsent, avgPresent, avgAbsent, playerStats, keyPoints };
+}
+
+function drawTeamReport(doc, r){
+  const { team, relevant, players, sessions, totalPresent, totalAbsent, avgPresent, avgAbsent, playerStats, keyPoints } = r;
   const goldRGB = [232,172,46];
   const inkRGB = [26,20,5];
 
@@ -1563,10 +1909,40 @@ async function generateReportInner(){
       }
     }
   });
-
-  doc.save(`rapport-presences-${team.replace(/[^a-z0-9]+/gi,'_')}.pdf`);
 }
 
+async function generateReportInner(team, startVal, endVal){
+  if(!team){ await showAlert('Choisissez une équipe.'); return false; }
+
+  const isAll = team === REPORT_ALL_TEAMS;
+  const teamList = isAll ? roster.teams.slice() : [team];
+  const reports = [];
+  let firstError = null;
+  teamList.forEach(t=>{
+    const r = computeTeamReport(t, startVal, endVal);
+    if(r.error){ if(!firstError) firstError = r.error; }
+    else reports.push(r);
+  });
+
+  if(reports.length===0){
+    if(isAll) await showAlert("Aucun entraînement ou aucun joueur trouvé pour les équipes sur la période choisie.");
+    else if(firstError==='no-player') await showAlert("Aucun joueur enregistré dans cette équipe.");
+    else await showAlert("Aucun entraînement trouvé pour cette équipe sur la période choisie.");
+    return false;
+  }
+
+  if(!window.jspdf){ await showAlert("La librairie de génération PDF n'a pas pu être chargée (vérifiez votre connexion internet)."); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+
+  reports.forEach((r, i)=>{
+    if(i>0) doc.addPage('a4', 'portrait');
+    drawTeamReport(doc, r);
+  });
+
+  const fileSuffix = isAll ? 'toutes-equipes' : team.replace(/[^a-z0-9]+/gi,'_');
+  doc.save(`rapport-presences-${fileSuffix}.pdf`);
+}
 
 // ---------- SAUVEGARDE / RESTAURATION ----------
 async function backupData(){
@@ -1691,43 +2067,93 @@ async function restoreData(input){
 
 // ---------- PRESENCES ----------
 function viewPresences(){
-  if(trainings.length===0){
-    return `<div class="card"><h2>Présences</h2><div class="empty">Créez d'abord un entraînement dans l'onglet "Entraînements".</div></div>`;
-  }
+  // Le calendrier est toujours affiché, même sans entraînement, pour permettre d'en créer.
   const sorted = [...trainings].sort((a,b)=> b.date.localeCompare(a.date));
-  if(!selectedTraining) selectedTraining = sorted[0].id;
-  const tr = trainings.find(t=>t.id===selectedTraining);
+  if(!selectedTraining && sorted.length) selectedTraining = sorted[0].id;
+  const tr = trainings.find(t=>t.id===selectedTraining) || sorted[0] || null;
+  selectedTraining = tr ? tr.id : null;
 
-  const picker = sorted.map(t=>{
-    return `<div class="training-card ${t.id===selectedTraining?'selected':''}">
-      <div onclick="selectTraining('${t.id}')" style="flex:1;cursor:pointer">
-        <div class="training-date">${formatDate(t.date)}</div>
-        <div style="font-size:12px;color:var(--ink-dim)">${escapeHtml(t.team)}</div>
-      </div>
-      <button class="del" onclick="event.stopPropagation(); deleteTraining('${t.id}')" style="margin-left:8px">Supprimer</button>
+  const year = presenceCalendarMonth.getFullYear();
+  const month = presenceCalendarMonth.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const mondayOffset = (firstDay.getDay() + 6) % 7;
+  const monthLabel = firstDay.toLocaleDateString('fr-FR', {month:'long', year:'numeric'});
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+
+  const byDate = {};
+  trainings.forEach(t=>{
+    if(!byDate[t.date]) byDate[t.date] = [];
+    byDate[t.date].push(t);
+  });
+
+  let cells = '';
+  for(let i=0;i<mondayOffset;i++) cells += `<div class="calendar-day empty-day"></div>`;
+  for(let day=1;day<=daysInMonth;day++){
+    const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    const dayTrainings = byDate[dateStr] || [];
+    const selected = dayTrainings.some(t=>t.id===selectedTraining);
+    const dayClass = ['calendar-day', dayTrainings.length?'has-training':'', selected?'selected-day':'', dateStr===todayStr?'today':''].filter(Boolean).join(' ');
+    const trainingHtml = dayTrainings.slice(0,3).map(t=>{
+      const label = `${t.team}${t.label?' · '+t.label:''}`;
+      return `<span class="calendar-training" data-training-id="${escapeHtml(t.id)}" data-longpress-type="training" data-longpress-id="${escapeHtml(t.id)}" title="Cliquez pour sélectionner • Double-clic ou appui long pour modifier">${escapeHtml(label)}</span>`;
+    }).join('');
+    const more = dayTrainings.length>3 ? `<span class="calendar-more">+${dayTrainings.length-3} autre${dayTrainings.length-3>1?'s':''}</span>` : '';
+    cells += `<div class="${dayClass}" onclick="selectDateFromPresenceCalendar('${dateStr}')">
+      <div class="calendar-day-number">${day}</div>${trainingHtml}${more}
     </div>`;
-  }).join('');
+  }
+  const totalCells = mondayOffset + daysInMonth;
+  const trailing = (7 - (totalCells % 7)) % 7;
+  for(let i=0;i<trailing;i++) cells += `<div class="calendar-day empty-day"></div>`;
+
+  const calendar = `
+  <div class="card">
+    <h2>Choisir un entraînement</h2>
+    <div class="presence-calendar">
+      <div class="calendar-head">
+        <button class="btn btn-ghost calendar-nav" onclick="changePresenceMonth(-1)" aria-label="Mois précédent">‹</button>
+        <div class="calendar-title">${escapeHtml(monthLabel)}</div>
+        <button class="btn btn-ghost calendar-nav" onclick="changePresenceMonth(1)" aria-label="Mois suivant">›</button>
+      </div>
+      <div class="calendar-weekdays">
+        ${['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'].map(d=>`<div class="calendar-weekday">${d}</div>`).join('')}
+      </div>
+      <div class="calendar-grid">${cells}</div>
+    </div>
+    <div style="font-size:11.5px;color:var(--ink-dim);margin-top:8px">${trainings.length ? 'Cliquez sur une séance pour saisir les présences, ou sur un jour pour créer un entraînement.' : 'Cliquez sur un jour du calendrier pour créer un premier entraînement.'}</div>
+  </div>`;
 
   let sheetHtml = '';
-  if(tr){
+  if(!tr){
+    sheetHtml = `<div class="card"><div class="empty">Aucun entraînement pour l'instant.</div></div>`;
+  }else{
     const concerned = concernedMembers(tr);
     const att = attendance[tr.id] || {};
     const present = concerned.filter(m=>att[m.id]===true).length;
     const rows = concerned.length ? concerned.map(m=>{
       const state = att[m.id];
+      const isPresent = state === true;
+      const isAbsent = state !== true;
+      const fullName = [m.name, m.prenom].filter(Boolean).join(' ');
       return `<div class="attend-row">
-        <div class="avatar">${initials(m.name)}</div>
-        <div class="attend-name">${escapeHtml(m.name)}</div>
+        <div class="avatar">${initials(fullName)}</div>
+        <div class="attend-name attend-name-editable" data-member-id="${m.id}" data-longpress-type="member" data-longpress-id="${m.id}" title="Double-clic ou appui long pour modifier l'adhérent">${escapeHtml(fullName)}</div>
         <div class="toggle">
-          <button class="${state===true?'on-present':''}" onclick="setAttendance('${tr.id}','${m.id}',true)">Présent</button>
-          <button class="${state===false?'on-absent':''}" onclick="setAttendance('${tr.id}','${m.id}',false)">Absent</button>
+          <button class="${isPresent?'on-present':''}" onclick="setAttendance('${tr.id}','${m.id}',true)">Présent</button>
+          <button class="${isAbsent?'on-absent':''}" onclick="setAttendance('${tr.id}','${m.id}',false)">Absent</button>
         </div>
       </div>`;
     }).join('') : '<div class="empty">Aucun adhérent concerné par cet entraînement.</div>';
 
+    const addArg = tr.team && tr.team!=='Tous' ? `{team:'${escapeAttr(tr.team)}'}` : '';
     sheetHtml = `
     <div class="card">
-      <h2>${formatDate(tr.date)} — ${escapeHtml(tr.team)}</h2>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+        <h2 style="margin:0">${formatDate(tr.date)} — ${escapeHtml(tr.team)}</h2>
+        <button class="btn" style="margin:0;padding:6px 10px;font-size:12px" onclick="openAddMemberDialog(${addArg})">+ Adhérent</button>
+      </div>
       <div style="font-size:13px;color:var(--ink-dim);margin-bottom:8px">
         <span class="score" style="font-size:17px">${present}/${concerned.length}</span> présents
       </div>
@@ -1735,13 +2161,66 @@ function viewPresences(){
     </div>`;
   }
 
-  return `
-  <div class="card">
-    <h2>Choisir un entraînement</h2>
-    ${picker}
-  </div>
-  ${sheetHtml}
-  `;
+  return calendar + sheetHtml;
+}
+function changeTrainingMonth(delta){
+  trainingCalendarMonth = new Date(trainingCalendarMonth.getFullYear(), trainingCalendarMonth.getMonth()+delta, 1);
+  renderMain();
+}
+function selectTrainingDate(dateStr){
+  const candidates = trainings.filter(t=>t.date===dateStr).sort((a,b)=>(a.team||'').localeCompare(b.team||'','fr',{sensitivity:'base'}));
+  if(candidates.length){
+    openEditTraining(candidates[0].id);
+    return;
+  }
+  const input = document.getElementById('trDate');
+  if(input){ input.value = dateStr; input.focus(); }
+}
+function changePresenceMonth(delta){
+  presenceCalendarMonth = new Date(presenceCalendarMonth.getFullYear(), presenceCalendarMonth.getMonth()+delta, 1);
+  renderMain();
+}
+function selectDateFromPresenceCalendar(dateStr){
+  openNewTrainingFromPresence(dateStr);
+}
+function openNewTrainingFromPresence(dateStr){
+  const root = document.getElementById('modalRoot');
+  const teamOptions = roster.teams.map(t=>`<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+  root.innerHTML = `<div class="modal-overlay" id="presenceTrainingOverlay">
+    <div class="modal-box" style="max-width:420px">
+      <h2 style="font-family:'Bebas Neue',sans-serif;font-size:20px;letter-spacing:0.5px;margin:0 0 12px;color:var(--gold)">Nouvel entraînement</h2>
+      <label for="presenceNewTrDate">Date</label>
+      <input id="presenceNewTrDate" type="date" value="${escapeHtml(dateStr)}" onclick="openDatePicker(this)">
+      <label for="presenceNewTrTeam">Équipe concernée</label>
+      <select id="presenceNewTrTeam">
+        <option value="Tous">Toutes les équipes</option>
+        ${teamOptions}
+      </select>
+      <label for="presenceNewTrLabel">Précision (facultatif)</label>
+      <input id="presenceNewTrLabel" type="text" placeholder="Ex. Séance physique">
+      <div class="modal-actions" style="margin-top:16px">
+        <button class="btn-cancel" id="presenceTrainingCancel">Annuler</button>
+        <button class="btn-ok" id="presenceTrainingSave">Créer l'entraînement</button>
+      </div>
+    </div>
+  </div>`;
+  const close = ()=>{ root.innerHTML=''; };
+  document.getElementById('presenceTrainingCancel').onclick = close;
+  document.getElementById('presenceTrainingSave').onclick = ()=>saveNewTrainingFromPresence();
+  root.querySelector('.modal-overlay').onclick = (e)=>{ if(e.target===root.querySelector('.modal-overlay')) close(); };
+}
+async function saveNewTrainingFromPresence(){
+  const date = document.getElementById('presenceNewTrDate').value;
+  const team = document.getElementById('presenceNewTrTeam').value;
+  const label = document.getElementById('presenceNewTrLabel').value.trim();
+  if(!date){ await showAlert('Choisissez une date.'); return; }
+  const training = { id: uid(), date, team, label };
+  trainings.push(training);
+  await setJSON('club:trainings', trainings);
+  selectedTraining = training.id;
+  presenceCalendarMonth = new Date(date+'T00:00:00');
+  document.getElementById('modalRoot').innerHTML = '';
+  renderMain();
 }
 function selectTraining(id){ selectedTraining = id; renderMain(); }
 async function setAttendance(trainingId, memberId, value){
@@ -1759,8 +2238,14 @@ async function sha256Hex(text){
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
+// « Se souvenir de moi » : on mémorise l'empreinte (hash) du mot de passe, jamais le mot de passe en clair.
+const REMEMBER_KEY = STORAGE_PREFIX + 'remember';
+function getRemembered(){ try{ return localStorage.getItem(REMEMBER_KEY); }catch(e){ return null; } }
+function setRemembered(hash){ try{ if(hash) localStorage.setItem(REMEMBER_KEY, hash); else localStorage.removeItem(REMEMBER_KEY); }catch(e){} }
+
 function logout(){
   sessionStorage.removeItem('kali-unlocked');
+  setRemembered(null);
   location.reload();
 }
 async function tryUnlock(){
@@ -1777,6 +2262,7 @@ async function tryUnlock(){
   }
   if(hash === PASSWORD_HASH){
     sessionStorage.setItem('kali-unlocked', 'true');
+    if(document.getElementById('lockRemember').checked) setRemembered(hash);
     document.getElementById('lockScreen').style.display = 'none';
     loadAll();
   }else{
@@ -1787,7 +2273,11 @@ async function tryUnlock(){
 }
 document.getElementById('lockPassword').addEventListener('keydown', e=>{ if(e.key==='Enter') tryUnlock(); });
 
-if(sessionStorage.getItem('kali-unlocked') === 'true'){
+// Appareil mémorisé : déverrouillage automatique tant que le mot de passe n'a pas changé
+const rememberedHash = getRemembered();
+if(rememberedHash && rememberedHash !== PASSWORD_HASH) setRemembered(null);
+if(sessionStorage.getItem('kali-unlocked') === 'true' || rememberedHash === PASSWORD_HASH){
+  sessionStorage.setItem('kali-unlocked', 'true');
   document.getElementById('lockScreen').style.display = 'none';
   loadAll();
 }
